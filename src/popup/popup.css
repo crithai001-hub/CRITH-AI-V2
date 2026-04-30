@@ -1,0 +1,245 @@
+:root {
+  color-scheme: light dark;
+  --fg: #111;
+  --fg-muted: #666;
+  --bg: #fff;
+  --surface: #f7f7f8;
+  --border: #e5e5e5;
+  --border-strong: #d0d0d0;
+  --accent: #0a84ff;
+  --accent-fg: #fff;
+  --danger: #c1272d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f4f4f4;
+    --fg-muted: #9a9a9a;
+    --bg: #1c1c1e;
+    --surface: #2a2a2c;
+    --border: #3a3a3c;
+    --border-strong: #4a4a4c;
+    --danger: #ff6961;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+body {
+  width: 320px;
+}
+
+main {
+  padding: 16px 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.version {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.muted {
+  color: var(--fg-muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.view[hidden] {
+  display: none;
+}
+
+/* ── Loading view ──────────────────────────────────────────── */
+
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: dot-pulse 1.2s infinite ease-in-out;
+}
+
+.dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes dot-pulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ── Login form ─────────────────────────────────────────────── */
+
+.field {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+
+.field input {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 80ms ease, box-shadow 80ms ease;
+}
+
+.field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.field input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error {
+  min-height: 1.2em;
+  margin: 6px 0 10px;
+  font-size: 12px;
+  color: var(--danger);
+  white-space: pre-wrap;
+}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+
+.btn-primary,
+.btn-secondary {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 80ms ease, opacity 80ms ease;
+}
+
+.btn-primary {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+.btn-secondary {
+  color: var(--fg);
+  background: transparent;
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── Logged-in account + quota ─────────────────────────────── */
+
+.account {
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+
+.account-email {
+  margin: 2px 0 0 0;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.quota {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+.quota-label {
+  font-weight: 500;
+}
+
+.quota-value {
+  font-variant-numeric: tabular-nums;
+}

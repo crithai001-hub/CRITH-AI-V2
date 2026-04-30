@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+
+.env
+.env.local
+.env.*.local
+
+manifest-key-private.pem
+.manifest-key-public.der
+
+.DS_Store
+*.log
+.idea/
+.vscode/

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crith</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main>
+      <header class="brand">
+        <h1>Crith</h1>
+        <span class="version" id="version">v0.0.1</span>
+      </header>
+
+      <section id="view-loading" class="view" hidden>
+        <p class="loading" id="loading-message">
+          <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span id="loading-text">Loading…</span>
+        </p>
+      </section>
+
+      <section id="view-logged-out" class="view" hidden>
+        <form id="login-form" novalidate>
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              spellcheck="false"
+              required
+            />
+          </label>
+          <label class="field">
+            <span class="field-label">Password</span>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+          </label>
+          <p class="error" id="login-error" role="alert"></p>
+          <button id="login-submit" type="submit" class="btn-primary">Log in</button>
+        </form>
+      </section>
+
+      <section id="view-logged-in" class="view" hidden>
+        <div class="account">
+          <p class="muted">Signed in as</p>
+          <p class="account-email" id="user-email">—</p>
+        </div>
+        <div class="quota">
+          <span class="quota-label">Quota</span>
+          <span class="quota-value" id="quota-value">— / —</span>
+        </div>
+        <button id="logout-btn" type="button" class="btn-secondary">Log out</button>
+      </section>
+    </main>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

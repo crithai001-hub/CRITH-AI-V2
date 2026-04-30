@@ -1,0 +1,31 @@
+{
+  "_NOTE_key": "TODO: paste public key here after running scripts/generate-key.sh — see README. Until then, the extension ID will be random per install. (JSON has no comments, so this underscore-prefixed field is the workaround. Chrome will print a single warning about it on load — that warning is the reminder.)",
+
+  "manifest_version": 3,
+  "name": "Crith",
+  "version": "0.0.1",
+  "description": "Stop AI from thinking for you. Crith surfaces the gaps, assumptions, and easy validations in every AI response so you can push back before you accept the answer.",
+
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Crith"
+  },
+
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*",
+    "https://crith-backend.vercel.app/*"
+  ]
+}
