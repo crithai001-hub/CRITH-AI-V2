@@ -27,13 +27,5 @@
     "https://claude.ai/*",
     "https://gemini.google.com/*",
     "https://crith-backend.vercel.app/*"
-  ],
-
-  "content_scripts": [
-    {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["src/content/chatgpt/index.ts"],
-      "run_at": "document_idle"
-    }
   ]
 }
