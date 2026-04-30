@@ -1,4 +1,4 @@
-import { getSupabaseClient } from './supabase-client'
+import { getSupabaseClient } from '../shared/supabase-client'
 import {
   getAuth,
   setAuth,

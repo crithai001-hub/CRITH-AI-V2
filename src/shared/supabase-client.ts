@@ -1,12 +1,15 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { getEnv } from '../shared/env'
+import { getEnv } from './env'
 
 let _client: SupabaseClient | null = null
 
 /**
- * Lazy singleton Supabase client for the popup.
- * - persistSession: false — we manage storage in chrome.storage.local ourselves
- * - autoRefreshToken: false — service worker handles refresh (step 3)
+ * Lazy singleton Supabase client. Used by both the popup (for password
+ * sign-in) and the service worker (for refreshSession). We manage tokens
+ * ourselves in chrome.storage.local, so:
+ *   - persistSession: false       — no localStorage
+ *   - autoRefreshToken: false     — refresh runs in the SW on demand
+ *   - detectSessionInUrl: false   — not an OAuth redirect target
  */
 export function getSupabaseClient(): SupabaseClient {
   if (_client) return _client
