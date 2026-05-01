@@ -27,5 +27,24 @@
     "https://claude.ai/*",
     "https://gemini.google.com/*",
     "https://crith-backend.vercel.app/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://grok.com/*",
+        "https://chat.deepseek.com/*",
+        "https://deepseek.com/*"
+      ],
+      "js": ["src/content/shared/prov-orchestrator.ts"],
+      "css": ["src/content/shared/underline.css"],
+      "run_at": "document_idle"
+    }
   ]
 }
