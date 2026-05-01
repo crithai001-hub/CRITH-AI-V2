@@ -48,32 +48,51 @@ let perNodeObservers = new WeakMap<Element, PerNodeEntry>()
 let perNodeObserverSet = new Set<() => void>()
 let inflight: InFlightEntry[] = []
 let started = false
+// Module-scoped reference to the container-retry interval so stop() can
+// clear it. Without this, an SPA URL change firing during the retry
+// window orphans the timer; its eventual fire would race with the
+// fresh start() the orchestrator schedules right after.
+let containerRetryTimer: ReturnType<typeof setInterval> | null = null
 
 export function start(_adapter: PlatformAdapter, _handler: ResponseCompleteHandler): void {
   if (started) return
-  started = true
+  // If we're already polling for the container, don't re-enter. (Defense
+  // in depth — the orchestrator always stop()s before start()ing, but
+  // this guards against any caller that doesn't.)
+  if (containerRetryTimer != null) return
   adapter = _adapter
   onResponseComplete = _handler
   log('observer.start — adapter:', _adapter.name)
 
   const container = adapter.getChatContainer()
-  if (!container) {
-    let attempts = 0
-    const retry = setInterval(() => {
-      attempts++
-      const c = adapter?.getChatContainer()
-      if (c) {
-        clearInterval(retry)
-        attachContainer(c)
-      } else if (attempts > 30) {
-        clearInterval(retry)
-        started = false
-        log('observer.start — gave up waiting for container after 30 attempts')
-      }
-    }, 1000)
+  if (container) {
+    started = true
+    attachContainer(container)
     return
   }
-  attachContainer(container)
+
+  // `started` stays false during the polling phase. It only flips when
+  // attachContainer actually wires the MutationObserver up. This way
+  // a stop() during retry leaves a clean slate for the next start().
+  let attempts = 0
+  containerRetryTimer = setInterval(() => {
+    attempts++
+    const c = adapter?.getChatContainer()
+    if (c) {
+      if (containerRetryTimer != null) {
+        clearInterval(containerRetryTimer)
+        containerRetryTimer = null
+      }
+      started = true
+      attachContainer(c)
+    } else if (attempts > 30) {
+      if (containerRetryTimer != null) {
+        clearInterval(containerRetryTimer)
+        containerRetryTimer = null
+      }
+      log('observer.start — gave up waiting for container after 30 attempts')
+    }
+  }, 1000)
 }
 
 function attachContainer(container: Element): void {
@@ -242,6 +261,10 @@ function enqueueGeneration(
 }
 
 export function stop(): void {
+  if (containerRetryTimer != null) {
+    try { clearInterval(containerRetryTimer) } catch { /* noop */ }
+    containerRetryTimer = null
+  }
   if (containerObserver) {
     try { containerObserver.disconnect() } catch { /* noop */ }
     containerObserver = null

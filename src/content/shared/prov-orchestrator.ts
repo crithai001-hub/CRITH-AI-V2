@@ -63,21 +63,22 @@ function detectAdapter(): PlatformAdapter | null {
 // responses. Replace with apiClient.analyzeResponse(...) when the real
 // backend wires in.
 
-// Directional provocations: each one names the issue AND points at a
-// specific next move, instead of asking the user to "think about it"
-// abstractly. This is the voice the real backend should emit too.
+// Directional provocations: each one IS the question — no preamble
+// summarizing what the AI did wrong. The lens dot + underline already
+// signal the type; the card just asks the question that points the
+// user at a specific next move.
 type MockState = { question: string; lens: Lens }
 const MOCK_STATES: readonly MockState[] = [
   {
-    question: "What audience did the AI assume here? What changes if they're enterprise instead of solopreneurs?",
+    question: "What changes if they're enterprise instead of solopreneurs?",
     lens: 'hidden_assumption',
   },
   {
-    question: "The AI agreed with your framing without testing it — what's one specific failure case that would invalidate this approach?",
+    question: "What's one specific failure case that would invalidate this approach?",
     lens: 'sycophancy',
   },
   {
-    question: "The AI made a specific claim with no source. Pick the most concrete number or name and search for it — if you can't find a primary source in 30 seconds, treat it as fabricated.",
+    question: 'Which specific claim here could you actually verify in 30 seconds?',
     lens: 'hallucination',
   },
 ]
