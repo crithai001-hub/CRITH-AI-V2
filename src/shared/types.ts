@@ -9,7 +9,13 @@ export type AuthTokens = {
 
 // ── Domain ───────────────────────────────────────────────────
 
-export type Platform = 'chatgpt' | 'claude' | 'gemini'
+export type Platform =
+  | 'chatgpt'
+  | 'claude'
+  | 'gemini'
+  | 'perplexity'
+  | 'grok'
+  | 'deepseek'
 
 /**
  * Lens label attached to a provocation. Backend-defined; treated as opaque

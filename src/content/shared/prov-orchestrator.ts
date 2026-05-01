@@ -22,7 +22,15 @@ import { adapter as geminiAdapter } from '../platforms/gemini'
 import { adapter as perplexityAdapter } from '../platforms/perplexity'
 import { adapter as grokAdapter } from '../platforms/grok'
 import { adapter as deepseekAdapter } from '../platforms/deepseek'
-import type { Lens, PlatformAdapter, Provocation } from '../../shared/types'
+import { isApiError } from '../../shared/api-client'
+import type {
+  AnalyzeResponse,
+  ApiError,
+  Lens,
+  Platform,
+  PlatformAdapter,
+  Provocation,
+} from '../../shared/types'
 
 const DEBUG = true
 const LOG_PREFIX = '[Crith V2 PROV]'
@@ -54,80 +62,6 @@ function detectAdapter(): PlatformAdapter | null {
   if (host.includes('grok.com')) return grokAdapter
   if (host.includes('deepseek.com')) return deepseekAdapter
   return null
-}
-
-// ── Mock provocation generator ───────────────────────────────
-//
-// Cycles through three states per response so we can verify all three
-// render variants (no-dot / orange-dot / purple-dot) on successive AI
-// responses. Replace with apiClient.analyzeResponse(...) when the real
-// backend wires in.
-
-// Directional provocations: each one IS the question — no preamble
-// summarizing what the AI did wrong. The lens dot + underline already
-// signal the type; the card just asks the question that points the
-// user at a specific next move.
-type MockState = { question: string; lens: Lens }
-const MOCK_STATES: readonly MockState[] = [
-  {
-    question: "What changes if they're enterprise instead of solopreneurs?",
-    lens: 'hidden_assumption',
-  },
-  {
-    question: "What's one specific failure case that would invalidate this approach?",
-    lens: 'sycophancy',
-  },
-  {
-    question: 'Which specific claim here could you actually verify in 30 seconds?',
-    lens: 'hallucination',
-  },
-]
-
-type MockResponse = {
-  skip: false
-  provocations: Array<{ question: string; lens: Lens; anchored_to: string; severity: 'medium' }>
-  analysis_id: string
-}
-
-type MockBag = { __crithMockIdx?: number }
-
-async function generateMockProvocation(_prompt: string, response: string): Promise<MockResponse> {
-  const g = globalThis as unknown as MockBag
-  g.__crithMockIdx = (g.__crithMockIdx ?? -1) + 1
-  const stateIdx = g.__crithMockIdx % MOCK_STATES.length
-  const state = MOCK_STATES[stateIdx]!
-
-  // Pick a SHORT phrase near the middle of the response to anchor the
-  // underline — not the whole sentence. Underlining an entire sentence
-  // wraps to multiple visual lines and reads as "the whole section is
-  // flagged"; a short phrase points at one specific main point. The
-  // real backend's `anchored_to` should follow the same convention.
-  const MAX_ANCHOR_CHARS = 60
-  const MIN_ANCHOR_CHARS = 30
-  const sentences = response.split(/(?<=[.!?])\s+/).filter((s) => s.length > 20)
-  const middle = sentences.length > 0
-    ? sentences[Math.floor(sentences.length / 2)]!
-    : response.slice(0, MAX_ANCHOR_CHARS * 2)
-
-  let anchoredTo = middle
-  if (middle.length > MAX_ANCHOR_CHARS) {
-    // Trim to last word boundary before MAX_ANCHOR_CHARS. If no space
-    // is found in a sensible range, fall back to the hard cap.
-    const head = middle.slice(0, MAX_ANCHOR_CHARS)
-    const lastSpace = head.lastIndexOf(' ')
-    anchoredTo = lastSpace >= MIN_ANCHOR_CHARS ? head.slice(0, lastSpace) : head
-  }
-
-  return {
-    skip: false,
-    provocations: [{
-      question: state.question,
-      lens: state.lens,
-      anchored_to: anchoredTo,
-      severity: 'medium',
-    }],
-    analysis_id: `mock-${Date.now()}`,
-  }
 }
 
 // ── Review log (dev tooling — throwaway) ─────────────────────
@@ -165,6 +99,12 @@ async function appendReviewLog(entry: ReviewEntry): Promise<void> {
 }
 
 // ── Response-complete handler ────────────────────────────────
+//
+// Sends an ANALYZE message to the service worker (which owns auth +
+// the api-client). The SW returns either an AnalyzeResponse or an
+// ApiError. The orchestrator never touches the backend or auth
+// directly — that's by design (single token-refresh path, no race
+// across N tabs).
 
 async function handleResponseComplete(params: {
   node: Element
@@ -173,20 +113,64 @@ async function handleResponseComplete(params: {
   sessionId: string
 }): Promise<void> {
   const { node, prompt, response, sessionId } = params
-  const result = await generateMockProvocation(prompt, response)
-  if (result.skip) return
-  if (result.provocations.length === 0) return
+  const platformName = adapter?.name ?? 'unknown'
 
-  // Inject provocation_id from analysis_id + index. Real backend will
-  // either supply provocation_id directly or this fallback continues.
+  // Synthetic message_id. Platforms expose per-message IDs differently
+  // (data-message-id on ChatGPT, render-count on Claude, etc.); the
+  // adapter contract doesn't surface it, so we derive a stable-ish key
+  // from sessionId + a short fingerprint of the response. The backend
+  // uses message_id mostly for dedup — equivalent values will be
+  // treated as the same message.
+  const messageId = `${sessionId}-${response.length}-${Date.now().toString(36)}`
+
+  let result: AnalyzeResponse | ApiError
+  try {
+    result = (await chrome.runtime.sendMessage({
+      type: 'ANALYZE',
+      payload: {
+        prompt,
+        response,
+        platform: platformName as Platform,
+        conversation_id: sessionId,
+        message_id: messageId,
+      },
+    })) as AnalyzeResponse | ApiError
+  } catch (err) {
+    // The SW listener might not be registered (extension reloaded
+    // mid-conversation, or first response after install before the SW
+    // wakes). Log and bail — never crash the page.
+    log('ANALYZE sendMessage failed:', err)
+    return
+  }
+
+  if (isApiError(result)) {
+    if (result.kind === 'AUTH_REQUIRED') {
+      log('ANALYZE → AUTH_REQUIRED — log in via the popup to enable provocations')
+    } else {
+      log(`ANALYZE error: ${result.kind}`, result)
+    }
+    return
+  }
+
+  if (result.skip) {
+    log(`ANALYZE skip${'reason' in result && result.reason ? ` (${result.reason})` : ''}`)
+    return
+  }
+
+  if (result.provocations.length === 0) {
+    log('ANALYZE returned skip=false but provocations array is empty')
+    return
+  }
+
+  // Inject provocation_id from analysis_id + index if the backend
+  // didn't supply one. Renderer needs it for idempotency / dedup.
   const provocations: Provocation[] = result.provocations.map((p, i) => ({
     ...p,
-    provocation_id: `${result.analysis_id}-${i}`,
+    provocation_id: p.provocation_id ?? `${result.analysis_id}-${i}`,
   }))
 
   // Log every triple to storage for the review dashboard. Fire-and-
   // forget — never block render on the storage round-trip.
-  const platformName = adapter?.name ?? 'unknown'
   for (const p of provocations) {
     void appendReviewLog({
       timestamp: Date.now(),
