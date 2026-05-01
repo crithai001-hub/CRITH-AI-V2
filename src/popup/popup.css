@@ -243,3 +243,29 @@ main {
 .quota-value {
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Dev footer ────────────────────────────────────────────── */
+
+.dev-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  text-align: center;
+}
+
+.btn-text {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 80ms ease, background 80ms ease;
+}
+
+.btn-text:hover {
+  color: var(--fg);
+  background: var(--surface);
+}

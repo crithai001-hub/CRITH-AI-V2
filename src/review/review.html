@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crith — Provocation Review</title>
+    <link rel="stylesheet" href="./review.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Provocation Review</h1>
+        <span class="dev-tag">dev tooling</span>
+      </div>
+      <div class="actions">
+        <span id="count" class="count">0 entries</span>
+        <button id="refresh" type="button" class="btn-secondary">Refresh</button>
+        <button id="clear" type="button" class="btn-danger">Clear log</button>
+      </div>
+    </header>
+
+    <main id="entries"></main>
+
+    <template id="entry-template">
+      <article class="entry">
+        <header class="entry-header">
+          <span class="lens-badge"></span>
+          <span class="meta-platform"></span>
+          <span class="meta-timestamp"></span>
+        </header>
+        <section class="provocation-block">
+          <h3>Provocation</h3>
+          <p class="question"></p>
+          <p class="anchor">
+            <span class="label">Anchored to:</span>
+            <span class="anchor-text"></span>
+          </p>
+        </section>
+        <section class="prompt-block">
+          <h3>Prompt</h3>
+          <pre class="prompt-text"></pre>
+        </section>
+        <section class="response-block">
+          <h3>Response</h3>
+          <pre class="response-text"></pre>
+        </section>
+      </article>
+    </template>
+
+    <script type="module" src="./review.ts"></script>
+  </body>
+</html>

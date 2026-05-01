@@ -11,6 +11,11 @@
     "default_title": "Crith"
   },
 
+  "options_ui": {
+    "page": "src/review/review.html",
+    "open_in_tab": true
+  },
+
   "background": {
     "service_worker": "src/background/service-worker.ts",
     "type": "module"

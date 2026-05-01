@@ -129,6 +129,40 @@ async function generateMockProvocation(_prompt: string, response: string): Promi
   }
 }
 
+// ── Review log (dev tooling — throwaway) ─────────────────────
+//
+// Captures every (prompt, response, provocation) triple to
+// chrome.storage.local under REVIEW_LOG_KEY so the review dashboard
+// (src/review/) can render them for human eyeballing. Capped at
+// REVIEW_LOG_CAP entries (FIFO eviction). Strip this whole block when
+// the real backend wires in.
+
+const REVIEW_LOG_KEY = 'crith_v2_prov_log'
+const REVIEW_LOG_CAP = 50
+
+type ReviewEntry = {
+  timestamp: number
+  platform: string
+  prompt: string
+  response: string
+  provocation: { question: string; lens: Lens; anchored_to: string }
+  sessionId: string
+}
+
+async function appendReviewLog(entry: ReviewEntry): Promise<void> {
+  try {
+    const r = await chrome.storage.local.get(REVIEW_LOG_KEY)
+    const existing = Array.isArray(r[REVIEW_LOG_KEY])
+      ? (r[REVIEW_LOG_KEY] as ReviewEntry[])
+      : []
+    existing.push(entry)
+    while (existing.length > REVIEW_LOG_CAP) existing.shift()
+    await chrome.storage.local.set({ [REVIEW_LOG_KEY]: existing })
+  } catch (err) {
+    log('appendReviewLog failed:', err)
+  }
+}
+
 // ── Response-complete handler ────────────────────────────────
 
 async function handleResponseComplete(params: {
@@ -137,7 +171,7 @@ async function handleResponseComplete(params: {
   response: string
   sessionId: string
 }): Promise<void> {
-  const { node, prompt, response } = params
+  const { node, prompt, response, sessionId } = params
   const result = await generateMockProvocation(prompt, response)
   if (result.skip) return
   if (result.provocations.length === 0) return
@@ -148,6 +182,20 @@ async function handleResponseComplete(params: {
     ...p,
     provocation_id: `${result.analysis_id}-${i}`,
   }))
+
+  // Log every triple to storage for the review dashboard. Fire-and-
+  // forget — never block render on the storage round-trip.
+  const platformName = adapter?.name ?? 'unknown'
+  for (const p of provocations) {
+    void appendReviewLog({
+      timestamp: Date.now(),
+      platform: platformName,
+      prompt,
+      response,
+      provocation: { question: p.question, lens: p.lens, anchored_to: p.anchored_to },
+      sessionId,
+    })
+  }
 
   log(
     'rendering',

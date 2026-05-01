@@ -106,6 +106,15 @@ loginForm.addEventListener('submit', async (e) => {
   }
 })
 
+const reviewBtn = document.getElementById('open-review') as HTMLButtonElement
+reviewBtn.addEventListener('click', () => {
+  if (chrome.runtime.openOptionsPage) {
+    chrome.runtime.openOptionsPage()
+  } else {
+    void chrome.tabs.create({ url: chrome.runtime.getURL('src/review/review.html') })
+  }
+})
+
 logoutBtn.addEventListener('click', async () => {
   setView('loading', 'Logging out…')
   try {
