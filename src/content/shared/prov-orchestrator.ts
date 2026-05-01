@@ -63,6 +63,9 @@ function detectAdapter(): PlatformAdapter | null {
 // responses. Replace with apiClient.analyzeResponse(...) when the real
 // backend wires in.
 
+// Directional provocations: each one names the issue AND points at a
+// specific next move, instead of asking the user to "think about it"
+// abstractly. This is the voice the real backend should emit too.
 type MockState = { question: string; lens: Lens }
 const MOCK_STATES: readonly MockState[] = [
   {
@@ -70,11 +73,11 @@ const MOCK_STATES: readonly MockState[] = [
     lens: 'hidden_assumption',
   },
   {
-    question: 'Where did the AI validate your framing without questioning it?',
+    question: "The AI agreed with your framing without testing it — what's one specific failure case that would invalidate this approach?",
     lens: 'sycophancy',
   },
   {
-    question: 'The AI cited a specific statistic — can you verify this is real?',
+    question: "The AI made a specific claim with no source. Pick the most concrete number or name and search for it — if you can't find a primary source in 30 seconds, treat it as fabricated.",
     lens: 'hallucination',
   },
 ]
@@ -93,13 +96,26 @@ async function generateMockProvocation(_prompt: string, response: string): Promi
   const stateIdx = g.__crithMockIdx % MOCK_STATES.length
   const state = MOCK_STATES[stateIdx]!
 
-  // Pick a sentence near the middle of the response to anchor the
-  // underline. Falls back to the first 100 chars when no long-enough
-  // sentence is present (e.g. a one-liner answer).
+  // Pick a SHORT phrase near the middle of the response to anchor the
+  // underline — not the whole sentence. Underlining an entire sentence
+  // wraps to multiple visual lines and reads as "the whole section is
+  // flagged"; a short phrase points at one specific main point. The
+  // real backend's `anchored_to` should follow the same convention.
+  const MAX_ANCHOR_CHARS = 60
+  const MIN_ANCHOR_CHARS = 30
   const sentences = response.split(/(?<=[.!?])\s+/).filter((s) => s.length > 20)
-  const anchoredTo = sentences.length > 0
+  const middle = sentences.length > 0
     ? sentences[Math.floor(sentences.length / 2)]!
-    : response.slice(0, 100)
+    : response.slice(0, MAX_ANCHOR_CHARS * 2)
+
+  let anchoredTo = middle
+  if (middle.length > MAX_ANCHOR_CHARS) {
+    // Trim to last word boundary before MAX_ANCHOR_CHARS. If no space
+    // is found in a sensible range, fall back to the hard cap.
+    const head = middle.slice(0, MAX_ANCHOR_CHARS)
+    const lastSpace = head.lastIndexOf(' ')
+    anchoredTo = lastSpace >= MIN_ANCHOR_CHARS ? head.slice(0, lastSpace) : head
+  }
 
   return {
     skip: false,
