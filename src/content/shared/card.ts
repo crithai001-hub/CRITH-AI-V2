@@ -92,7 +92,21 @@ export function attach(
   let cachedExplanation: string | null = null
   let collapseTimer: ReturnType<typeof setTimeout> | null = null
   let errorTimer: ReturnType<typeof setTimeout> | null = null
-  let handled = false
+  /**
+   * Locks the rating buttons after the user picks one. The card stays
+   * accessible via hover after rating — only the rating buttons get
+   * disabled. We no longer set a global "handled" flag that blocks
+   * the card from opening again, so the user can re-read the
+   * provocation any time.
+   */
+  let ratingChosen: 'useful' | 'not_useful' | null = null
+
+  function applyRatingLock(): void {
+    if (ratingChosen != null) {
+      notUsefulBtn.disabled = true
+      usefulBtn.disabled = true
+    }
+  }
 
   function setState(state: CardState): void {
     cardState = state
@@ -114,6 +128,7 @@ export function attach(
         explainBtn.disabled = !hasIds
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
+        applyRatingLock()
         break
       }
       case 'loading': {
@@ -126,6 +141,7 @@ export function attach(
         explainBtn.disabled = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
+        applyRatingLock()
         break
       }
       case 'explained': {
@@ -138,6 +154,7 @@ export function attach(
         explainBtn.disabled = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
+        applyRatingLock()
         break
       }
       case 'error': {
@@ -163,10 +180,9 @@ export function attach(
 
   setState('default')
 
-  // ── Hover/tap → open/close (unchanged from prior impl) ──────
+  // ── Hover/tap → open/close ──────────────────────────────────
 
   const open = (): void => {
-    if (handled) return
     if (collapseTimer != null) {
       clearTimeout(collapseTimer)
       collapseTimer = null
@@ -281,17 +297,19 @@ export function attach(
         return
       }
 
-      // Useful / Not useful — terminal rating actions for this card.
-      if (handled) return
+      // Useful / Not useful — rating actions. Once chosen the rating is
+      // locked (both buttons disabled, chosen button gets a check
+      // glyph) but the card itself stays accessible: hovering the logo
+      // reopens it so the user can re-read the provocation at any time.
       if (action !== 'useful' && action !== 'not_useful') return
+      if (ratingChosen != null) return
 
-      handled = true
-      card.classList.remove('open')
-      logo.classList.add('handled')
+      ratingChosen = action
+      btn.classList.add('is-chosen')
+      applyRatingLock()
 
       // Fire engagement event (fire-and-forget). Backend's /api/events
-      // must accept event_type='useful' and 'not_useful' — same as the
-      // 'explained' event addition.
+      // must accept event_type='useful' and 'not_useful'.
       if (hasIds) {
         void chrome.runtime
           .sendMessage({

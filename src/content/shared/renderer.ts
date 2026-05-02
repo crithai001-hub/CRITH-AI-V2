@@ -25,7 +25,11 @@ function log(...args: unknown[]): void { if (DEBUG) console.log(LOG_PREFIX, ...a
 function warn(...args: unknown[]): void { if (DEBUG) console.warn(LOG_PREFIX, ...args) }
 
 const NARROW_VIEWPORT_PX = 768
-const STACK_SPACING_PX = 28
+// Vertical offset between stacked logos for one response carrying
+// multiple provocations. Bumped from 28 to 36 for the larger 24px
+// logo + the 8px hit-area extension so adjacent hosts don't overlap
+// each other's hover zones.
+const STACK_SPACING_PX = 36
 
 const SHADOW_STYLES = `
   :host { all: initial; }
@@ -35,15 +39,28 @@ const SHADOW_STYLES = `
   }
   .crith-prov-logo {
     position: relative;
-    width: 20px; height: 20px; border-radius: 50%;
+    width: 24px; height: 24px; border-radius: 50%;
     background: var(--crith-prov-color, #4F46E5);
-    cursor: pointer; transition: opacity 200ms ease;
+    cursor: pointer; transition: opacity 200ms ease, box-shadow 120ms ease;
     box-shadow: 0 1px 3px rgba(0,0,0,0.15);
     display: flex; align-items: center; justify-content: center;
   }
+  /* Invisible hit-area extension. Pseudo-elements bubble pointer events
+     to their parent, so hovering anywhere within ~40x40 around the logo
+     triggers the same mouseenter as hovering the visible 24x24 circle.
+     Makes the logo MUCH easier to land on with the cursor. */
+  .crith-prov-logo::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+  }
+  .crith-prov-logo:hover {
+    box-shadow: 0 2px 6px rgba(0,0,0,0.22);
+  }
   .crith-prov-logo.pulse { animation: prov-pulse 1.6s ease-out 1; }
-  .crith-prov-logo.handled { opacity: 0.4; }
-  .crith-prov-mark { display: block; width: 11px; height: 16.5px; }
+  .crith-prov-logo.handled { opacity: 0.55; }
+  .crith-prov-mark { display: block; width: 13px; height: 19.5px; }
 
   .crith-prov-dot {
     position: absolute;
@@ -61,7 +78,7 @@ const SHADOW_STYLES = `
   }
 
   .card {
-    position: absolute; top: 28px; right: 0;
+    position: absolute; top: 32px; right: 0;
     width: 320px; max-width: 90vw;
     background: #fff; color: #111;
     border: 1px solid rgba(0,0,0,0.08);
@@ -173,6 +190,15 @@ const SHADOW_STYLES = `
   }
   .card .controls .btn-tertiary:active:not(:disabled) {
     background: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 14%, transparent);
+  }
+
+  /* Marker for the rating button the user chose. Shown as a leading
+     check glyph on the chosen button. The button itself is also
+     disabled in card.ts so the rating can't be re-tapped, but the
+     card stays accessible — hovering reopens for review. */
+  .card .controls button.is-chosen::before {
+    content: '\\2713\\00a0';
+    font-weight: 600;
   }
 
   @media (prefers-color-scheme: dark) {
