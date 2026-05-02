@@ -99,28 +99,81 @@ const SHADOW_STYLES = `
     color: #c1272d;
   }
   .card .controls {
-    display: flex; gap: 8px; justify-content: flex-end;
+    display: flex;
+    gap: 8px;
+    align-items: center;
   }
-  .card .controls .btn-primary,
-  .card .controls .btn-secondary {
-    font: inherit; cursor: pointer;
-    border-radius: 4px;
+  .card .controls button {
+    font: inherit;
+    font-size: 12.5px;
     font-weight: 500;
+    cursor: pointer;
+    border-radius: 6px;
+    padding: 6px 12px;
+    border: 1px solid transparent;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      box-shadow 120ms ease,
+      transform 80ms ease,
+      filter 120ms ease;
+    white-space: nowrap;
+    letter-spacing: -0.005em;
   }
+  .card .controls button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: none;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* Primary — "Useful". Filled accent, the action we want most often. */
   .card .controls .btn-primary {
     background: var(--crith-prov-color, #4F46E5);
     color: #fff;
-    border: 1px solid transparent;
-    padding: 4px 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   }
-  .card .controls .btn-primary:hover { filter: brightness(0.9); }
+  .card .controls .btn-primary:hover:not(:disabled) {
+    filter: brightness(0.93);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+    transform: translateY(-0.5px);
+  }
+  .card .controls .btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.88);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Secondary — "Not useful". Subtle bg, neutral border. */
   .card .controls .btn-secondary {
-    background: transparent;
-    color: inherit;
-    border: 1px solid rgba(0,0,0,0.12);
-    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.035);
+    color: rgba(0, 0, 0, 0.72);
+    border-color: rgba(0, 0, 0, 0.09);
   }
-  .card .controls .btn-secondary:hover { background: rgba(0,0,0,0.04); }
+  .card .controls .btn-secondary:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.07);
+    border-color: rgba(0, 0, 0, 0.16);
+  }
+  .card .controls .btn-secondary:active:not(:disabled) {
+    background: rgba(0, 0, 0, 0.11);
+  }
+
+  /* Tertiary — "Why this matters". Accent-tinted, pushed to the right
+     edge via margin-left: auto so the ratings cluster on the left. */
+  .card .controls .btn-tertiary {
+    background: transparent;
+    color: var(--crith-prov-color, #4F46E5);
+    border-color: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 28%, transparent);
+    margin-left: auto;
+  }
+  .card .controls .btn-tertiary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 8%, transparent);
+    border-color: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 48%, transparent);
+  }
+  .card .controls .btn-tertiary:active:not(:disabled) {
+    background: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 14%, transparent);
+  }
 
   @media (prefers-color-scheme: dark) {
     .card {
@@ -130,10 +183,16 @@ const SHADOW_STYLES = `
     .card .loader { color: rgba(255,255,255,0.55); }
     .card .error-msg { color: #ff6961; }
     .card .controls .btn-secondary {
-      border-color: rgba(255,255,255,0.12);
+      background: rgba(255, 255, 255, 0.04);
+      color: rgba(255, 255, 255, 0.78);
+      border-color: rgba(255, 255, 255, 0.10);
     }
-    .card .controls .btn-secondary:hover {
-      background: rgba(255,255,255,0.06);
+    .card .controls .btn-secondary:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+    .card .controls .btn-secondary:active:not(:disabled) {
+      background: rgba(255, 255, 255, 0.12);
     }
   }
 `
@@ -394,11 +453,14 @@ function createHost(
   const controls = document.createElement('div')
   controls.className = 'controls'
 
-  // V2 buttons. Order: Not useful, Explain, Useful (rightmost = primary).
+  // V2 buttons. Layout: ratings cluster on the left, the "Why this
+  // matters" button is pushed to the right via .btn-tertiary's
+  // margin-left: auto. Useful is primary (filled accent) since
+  // affirmative ratings carry the heavier signal for prompt tuning.
   const buttons: Array<{ cls: string; action: string; label: string }> = [
-    { cls: 'btn-secondary', action: 'not_useful', label: 'Not useful' },
-    { cls: 'btn-secondary', action: 'explain',    label: 'Explain' },
     { cls: 'btn-primary',   action: 'useful',     label: 'Useful' },
+    { cls: 'btn-secondary', action: 'not_useful', label: 'Not useful' },
+    { cls: 'btn-tertiary',  action: 'explain',    label: 'Why this matters' },
   ]
   for (const b of buttons) {
     const btn = document.createElement('button')
