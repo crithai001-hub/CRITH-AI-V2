@@ -103,6 +103,10 @@ const SHADOW_STYLES = `
     cursor: pointer;
     transition: opacity 120ms ease;
   }
+  /* Override our own display:inline-block when [hidden] is set in JS.
+     Without this, the back-link stays visible in the default state
+     because (0,3,0) specificity beats the UA's (0,1,0) [hidden] rule. */
+  .card .back-link[hidden] { display: none; }
   .card .back-link:hover { opacity: 0.75; }
   .card .loader {
     margin: 0 0 10px 0;
