@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../shared/supabase-client'
 import { getAuth, setAuth, clearAuth } from '../shared/storage'
+import { tryAutoLogin } from '../shared/auto-login'
 import type { AuthTokens } from '../shared/types'
 
 const REFRESH_BUFFER_SECONDS = 60
@@ -18,8 +19,15 @@ const LOG_PREFIX = '[Crith SW]'
  * Designed to be passed as the GetAccessToken dependency into the API client.
  */
 export async function getAccessTokenWithRefresh(): Promise<string | null> {
-  const auth = await getAuth()
-  if (!auth) return null
+  let auth = await getAuth()
+  if (!auth) {
+    // No auth in storage — try the dev auto-login path. Returns null
+    // when no credentials are set in .env.local, in which case we
+    // surface AUTH_REQUIRED to the caller as before.
+    const fresh = await tryAutoLogin()
+    if (!fresh) return null
+    auth = fresh
+  }
 
   const now = Math.floor(Date.now() / 1000)
   if (auth.expires_at > now + REFRESH_BUFFER_SECONDS) {

@@ -7,6 +7,7 @@ import {
   setUserEmail,
 } from '../shared/storage'
 import { getEnv } from '../shared/env'
+import { tryAutoLogin } from '../shared/auto-login'
 import type { AuthTokens } from '../shared/types'
 
 const versionEl = document.getElementById('version')
@@ -58,8 +59,19 @@ async function init(): Promise<void> {
     showEnvError(env.missing)
     return
   }
-  const [auth, email] = await Promise.all([getAuth(), getUserEmail()])
+  let [auth, email] = await Promise.all([getAuth(), getUserEmail()])
   const now = Math.floor(Date.now() / 1000)
+
+  // Try the dev auto-login if storage is empty or stale. No-op when
+  // VITE_DEV_AUTO_LOGIN_EMAIL/PASSWORD aren't set in .env.local.
+  if (!auth || auth.expires_at <= now) {
+    const fresh = await tryAutoLogin()
+    if (fresh) {
+      auth = fresh
+      email = await getUserEmail()
+    }
+  }
+
   if (auth && email && auth.expires_at > now) {
     showLoggedIn(email)
   } else {
