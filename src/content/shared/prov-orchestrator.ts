@@ -164,9 +164,14 @@ async function handleResponseComplete(params: {
 
   // Inject provocation_id from analysis_id + index if the backend
   // didn't supply one. Renderer needs it for idempotency / dedup.
+  // analysis_id and provocation_index are stamped onto each provocation
+  // so the card's Explain handler can call EXPLAIN_PROVOCATION /
+  // LOG_EVENT without re-deriving them.
   const provocations: Provocation[] = result.provocations.map((p, i) => ({
     ...p,
     provocation_id: p.provocation_id ?? `${result.analysis_id}-${i}`,
+    analysis_id: result.analysis_id,
+    provocation_index: i,
   }))
 
   // Log every triple to storage for the review dashboard. Fire-and-
@@ -182,9 +187,14 @@ async function handleResponseComplete(params: {
     })
   }
 
+  // Inline-stringified so the preview is readable in the console without
+  // having to expand a collapsed Array(N).
   log(
-    'rendering',
-    provocations.map((p) => ({ id: p.provocation_id, lens: p.lens, anchor_len: p.anchored_to.length })),
+    'rendering ' + JSON.stringify(provocations.map((p) => ({
+      lens: p.lens,
+      anchor_len: p.anchored_to.length,
+      anchor_preview: p.anchored_to.slice(0, 80),
+    }))),
   )
   rendererShow(node, provocations)
 }

@@ -19,6 +19,11 @@
 import { attach as attachCard } from './card'
 import type { Lens, Provocation } from '../../shared/types'
 
+const DEBUG = true
+const LOG_PREFIX = '[Crith V2 PROV RENDER]'
+function log(...args: unknown[]): void { if (DEBUG) console.log(LOG_PREFIX, ...args) }
+function warn(...args: unknown[]): void { if (DEBUG) console.warn(LOG_PREFIX, ...args) }
+
 const NARROW_VIEWPORT_PX = 768
 const STACK_SPACING_PX = 28
 
@@ -67,7 +72,32 @@ const SHADOW_STYLES = `
     display: none;
   }
   .card.open { display: block; }
-  .card .text { margin: 0 0 10px 0; }
+  .card .text {
+    margin: 0 0 10px 0;
+    transition: opacity 200ms ease;
+  }
+  .card .back-link {
+    display: inline-block;
+    margin: 0 0 8px 0;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--crith-prov-color, #4F46E5);
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 120ms ease;
+  }
+  .card .back-link:hover { opacity: 0.75; }
+  .card .loader {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    font-style: italic;
+    color: rgba(0,0,0,0.55);
+  }
+  .card .error-msg {
+    margin: 0 0 10px 0;
+    font-size: 12px;
+    color: #c1272d;
+  }
   .card .controls {
     display: flex; gap: 8px; justify-content: flex-end;
   }
@@ -97,6 +127,8 @@ const SHADOW_STYLES = `
       background: #1f1f23; color: #f0f0f0;
       border-color: rgba(255,255,255,0.08);
     }
+    .card .loader { color: rgba(255,255,255,0.55); }
+    .card .error-msg { color: #ff6961; }
     .card .controls .btn-secondary {
       border-color: rgba(255,255,255,0.12);
     }
@@ -217,7 +249,10 @@ export function show(responseNode: Element, provocations: Provocation[]): void {
 }
 
 function wrapUnderline(responseNode: Element, target: string, lens: Lens): HTMLSpanElement[] {
-  if (!target || target.length < 3) return []
+  if (!target || target.length < 3) {
+    warn(`empty/short anchored_to (len ${target?.length ?? 0}) — skipping`)
+    return []
+  }
   const walker = document.createTreeWalker(responseNode, NodeFilter.SHOW_TEXT)
   const textNodes: Text[] = []
   let n: Node | null
@@ -225,7 +260,14 @@ function wrapUnderline(responseNode: Element, target: string, lens: Lens): HTMLS
 
   const full = textNodes.map((t) => t.nodeValue ?? '').join('')
   const offset = full.indexOf(target)
-  if (offset < 0) return []
+  if (offset < 0) {
+    warn(
+      `anchored_to NOT FOUND verbatim in response — backend likely paraphrased instead of quoting exactly`,
+      `\n  target (${target.length} chars): "${target.slice(0, 140)}${target.length > 140 ? '…' : ''}"`,
+      `\n  response head (${full.length} total): "${full.slice(0, 200)}…"`,
+    )
+    return []
+  }
   const endOffset = offset + target.length
 
   let cursor = 0
@@ -266,6 +308,7 @@ function wrapUnderline(responseNode: Element, target: string, lens: Lens): HTMLS
     parent.removeChild(w.node)
     spans.push(span)
   }
+  log(`wrapped ${spans.length} span(s) for "${target.slice(0, 60)}${target.length > 60 ? '…' : ''}" (lens=${lens})`)
   return spans
 }
 
@@ -312,20 +355,49 @@ function createHost(
 
   const card = document.createElement('div')
   card.className = 'card'
+  card.dataset.state = 'default'
   card.setAttribute('role', 'dialog')
   card.setAttribute('aria-label', 'Provocation')
 
+  // "← Back to question" link, hidden until the card enters the
+  // explained state. Click reverts to the question text without
+  // re-fetching the explanation (cached on card.ts state).
+  const backLink = document.createElement('a')
+  backLink.className = 'back-link'
+  backLink.setAttribute('data-action', 'back')
+  backLink.setAttribute('href', '#')
+  backLink.textContent = '← Back to question'
+  backLink.hidden = true
+  card.appendChild(backLink)
+
+  // Main text — holds question text by default, swapped to the
+  // explanation while in the explained state.
   const text = document.createElement('p')
   text.className = 'text'
   text.textContent = (provocation.question || '').slice(0, 220)
   card.appendChild(text)
 
+  // Loading indicator while EXPLAIN_PROVOCATION is in flight.
+  const loader = document.createElement('p')
+  loader.className = 'loader'
+  loader.textContent = 'Thinking…'
+  loader.hidden = true
+  card.appendChild(loader)
+
+  // Transient error message — shown for 3s after a failed explain call.
+  const errorMsg = document.createElement('p')
+  errorMsg.className = 'error-msg'
+  errorMsg.textContent = "Couldn't explain — try again."
+  errorMsg.hidden = true
+  card.appendChild(errorMsg)
+
   const controls = document.createElement('div')
   controls.className = 'controls'
 
-  // V2 buttons. Order: Dismiss, then Ask this → (rightmost = primary).
+  // V2 buttons. Order: Dismiss, Explain, Ask this → (rightmost = primary).
   const buttons: Array<{ cls: string; action: string; label: string }> = [
     { cls: 'btn-secondary', action: 'dismiss', label: 'Dismiss' },
+    { cls: 'btn-secondary', action: 'explain', label: 'Explain' },
     { cls: 'btn-primary',   action: 'ask',     label: 'Ask this →' },
   ]
   for (const b of buttons) {

@@ -39,6 +39,18 @@ export type Provocation = {
    * renderer. Renderer uses it for idempotency keys and dedup.
    */
   provocation_id?: string
+  /**
+   * Analysis-level id this provocation belongs to. Set by the
+   * orchestrator from AnalyzeResponseSuccess.analysis_id when mapping
+   * the response. Used by EXPLAIN_PROVOCATION + LOG_EVENT calls.
+   */
+  analysis_id?: string
+  /**
+   * Index of this provocation within the analysis_id's provocations
+   * array. Set by the orchestrator. Used as the second key for
+   * EXPLAIN_PROVOCATION + LOG_EVENT calls.
+   */
+  provocation_index?: number
   /** The provocation text shown in the card. */
   question: string
   /** Verbatim substring of the AI response to wrap with the underline. */
@@ -78,11 +90,23 @@ export type EventType =
   | 'sent_to_ai'
   | 'dismissed'
   | 'copied'
+  | 'explained'
 
 export type EventRequest = {
   analysis_id: string
   provocation_index: number
   event_type: EventType
+}
+
+// ── /api/explain-provocation ─────────────────────────────────
+
+export type ExplainRequest = {
+  analysis_id: string
+  provocation_index: number
+}
+
+export type ExplainResponse = {
+  explanation: string
 }
 
 // ── API errors ───────────────────────────────────────────────
@@ -104,6 +128,10 @@ export type ApiError =
 export type AnalyzeMessage = { type: 'ANALYZE'; payload: AnalyzeRequest }
 export type LogEventMessage = { type: 'LOG_EVENT'; payload: EventRequest }
 export type AuthStatusMessage = { type: 'AUTH_STATUS' }
+export type ExplainProvocationMessage = {
+  type: 'EXPLAIN_PROVOCATION'
+  payload: ExplainRequest
+}
 /** Removed before launch — manual end-to-end pipeline test. */
 export type DebugTestBackendMessage = { type: 'DEBUG_TEST_BACKEND' }
 
@@ -111,6 +139,7 @@ export type IncomingMessage =
   | AnalyzeMessage
   | LogEventMessage
   | AuthStatusMessage
+  | ExplainProvocationMessage
   | DebugTestBackendMessage
 
 export type AuthStatusResponse =

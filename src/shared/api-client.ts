@@ -4,7 +4,14 @@ import type {
   AnalyzeResponse,
   ApiError,
   EventRequest,
+  ExplainRequest,
+  ExplainResponse,
 } from './types'
+
+const MOCK_EXPLANATION =
+  'This is a placeholder explanation while the backend is wired up. ' +
+  'In production, this text comes from a separate Claude call that ' +
+  'unpacks the provocation in 2-3 plain sentences.'
 
 export type GetAccessToken = () => Promise<string | null>
 
@@ -121,4 +128,28 @@ export async function logEvent(
   )
   if (isApiError(result)) return result
   return { ok: true }
+}
+
+/**
+ * Explain a single provocation in plain sentences.
+ *
+ * Mock support: if `analysis_id` starts with "mock-", returns the
+ * hardcoded MOCK_EXPLANATION synchronously without hitting the backend.
+ * The orchestrator currently produces only real backend analysis_ids
+ * (UUIDs), so this branch is dormant in production — but kept so the
+ * UI flow can be tested without auth or a deployed /api/explain
+ * endpoint.
+ */
+export async function explainProvocation(
+  payload: ExplainRequest,
+  getAccessToken: GetAccessToken,
+): Promise<ExplainResponse | ApiError> {
+  if (payload.analysis_id.startsWith('mock-')) {
+    return { explanation: MOCK_EXPLANATION }
+  }
+  return callBackend<ExplainResponse>(
+    '/api/explain-provocation',
+    payload,
+    getAccessToken,
+  )
 }

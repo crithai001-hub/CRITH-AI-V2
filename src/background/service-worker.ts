@@ -1,5 +1,10 @@
 import { getAccessTokenWithRefresh } from './auth'
-import { analyzeResponse, logEvent, isApiError } from '../shared/api-client'
+import {
+  analyzeResponse,
+  explainProvocation,
+  logEvent,
+  isApiError,
+} from '../shared/api-client'
 import { getAuth, getUserEmail } from '../shared/storage'
 import type {
   AnalyzeRequest,
@@ -109,6 +114,28 @@ async function handleMessage(message: IncomingMessage): Promise<unknown> {
       const status = await getAuthStatus()
       console.log(`${LOG_PREFIX} AUTH_STATUS logged_in=${status.logged_in}`)
       return status
+    }
+
+    case 'EXPLAIN_PROVOCATION': {
+      console.log(
+        `${LOG_PREFIX} EXPLAIN_PROVOCATION analysis_id=${message.payload.analysis_id} idx=${message.payload.provocation_index}`,
+      )
+      const result = await explainProvocation(
+        message.payload,
+        getAccessTokenWithRefresh,
+      )
+      if (isApiError(result)) {
+        if (result.kind === 'AUTH_REQUIRED' || result.kind === 'QUOTA_EXCEEDED') {
+          console.warn(`${LOG_PREFIX} EXPLAIN_PROVOCATION error:`, result)
+        } else {
+          console.error(`${LOG_PREFIX} EXPLAIN_PROVOCATION error:`, result)
+        }
+      } else {
+        console.log(
+          `${LOG_PREFIX} EXPLAIN_PROVOCATION ok len=${result.explanation.length}`,
+        )
+      }
+      return result
     }
 
     case 'DEBUG_TEST_BACKEND': {
