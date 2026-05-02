@@ -91,6 +91,8 @@ export type EventType =
   | 'dismissed'
   | 'copied'
   | 'explained'
+  | 'useful'
+  | 'not_useful'
 
 export type EventRequest = {
   analysis_id: string

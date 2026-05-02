@@ -394,11 +394,11 @@ function createHost(
   const controls = document.createElement('div')
   controls.className = 'controls'
 
-  // V2 buttons. Order: Dismiss, Explain, Ask this → (rightmost = primary).
+  // V2 buttons. Order: Not useful, Explain, Useful (rightmost = primary).
   const buttons: Array<{ cls: string; action: string; label: string }> = [
-    { cls: 'btn-secondary', action: 'dismiss', label: 'Dismiss' },
-    { cls: 'btn-secondary', action: 'explain', label: 'Explain' },
-    { cls: 'btn-primary',   action: 'ask',     label: 'Ask this →' },
+    { cls: 'btn-secondary', action: 'not_useful', label: 'Not useful' },
+    { cls: 'btn-secondary', action: 'explain',    label: 'Explain' },
+    { cls: 'btn-primary',   action: 'useful',     label: 'Useful' },
   ]
   for (const b of buttons) {
     const btn = document.createElement('button')

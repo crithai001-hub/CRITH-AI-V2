@@ -59,14 +59,14 @@ export function attach(
   const _explainBtn = card.querySelector(
     'button[data-action="explain"]',
   ) as HTMLButtonElement | null
-  const _dismissBtn = card.querySelector(
-    'button[data-action="dismiss"]',
+  const _notUsefulBtn = card.querySelector(
+    'button[data-action="not_useful"]',
   ) as HTMLButtonElement | null
-  const _askBtn = card.querySelector(
-    'button[data-action="ask"]',
+  const _usefulBtn = card.querySelector(
+    'button[data-action="useful"]',
   ) as HTMLButtonElement | null
 
-  if (!_text || !_loader || !_errorMsg || !_backLink || !_explainBtn || !_dismissBtn || !_askBtn) {
+  if (!_text || !_loader || !_errorMsg || !_backLink || !_explainBtn || !_notUsefulBtn || !_usefulBtn) {
     return
   }
 
@@ -78,8 +78,8 @@ export function attach(
   const errorMsg = _errorMsg
   const backLink = _backLink
   const explainBtn = _explainBtn
-  const dismissBtn = _dismissBtn
-  const askBtn = _askBtn
+  const notUsefulBtn = _notUsefulBtn
+  const usefulBtn = _usefulBtn
 
   const questionText = (provocation.question || '').slice(0, 220)
   const hasIds =
@@ -112,20 +112,20 @@ export function attach(
         backLink.hidden = true
         explainBtn.hidden = false
         explainBtn.disabled = !hasIds
-        dismissBtn.disabled = false
-        askBtn.disabled = false
+        notUsefulBtn.disabled = false
+        usefulBtn.disabled = false
         break
       }
       case 'loading': {
-        // Hide question; show "Thinking…". Dismiss + Ask remain
-        // clickable so the user can bail out at any time.
+        // Hide question; show "Thinking…". Not useful + Useful remain
+        // clickable so the user can bail out / rate at any time.
         text.hidden = true
         loader.hidden = false
         errorMsg.hidden = true
         backLink.hidden = true
         explainBtn.disabled = true
-        dismissBtn.disabled = false
-        askBtn.disabled = false
+        notUsefulBtn.disabled = false
+        usefulBtn.disabled = false
         break
       }
       case 'explained': {
@@ -136,8 +136,8 @@ export function attach(
         backLink.hidden = false
         explainBtn.hidden = true
         explainBtn.disabled = true
-        dismissBtn.disabled = false
-        askBtn.disabled = false
+        notUsefulBtn.disabled = false
+        usefulBtn.disabled = false
         break
       }
       case 'error': {
@@ -151,8 +151,8 @@ export function attach(
         backLink.hidden = true
         explainBtn.hidden = false
         explainBtn.disabled = !hasIds
-        dismissBtn.disabled = false
-        askBtn.disabled = false
+        notUsefulBtn.disabled = false
+        usefulBtn.disabled = false
         errorTimer = setTimeout(() => {
           if (cardState === 'error') setState('default')
         }, ERROR_DISPLAY_MS)
@@ -281,16 +281,34 @@ export function attach(
         return
       }
 
-      // Dismiss / Ask — terminal actions for this card.
+      // Useful / Not useful — terminal rating actions for this card.
       if (handled) return
+      if (action !== 'useful' && action !== 'not_useful') return
+
       handled = true
       card.classList.remove('open')
       logo.classList.add('handled')
 
-      if (action === 'ask') {
-        console.log('[Crith V2] ask this:', provocation.question)
-      } else if (action === 'dismiss') {
-        console.log('[Crith V2] dismissed:', provocation.provocation_id)
+      // Fire engagement event (fire-and-forget). Backend's /api/events
+      // must accept event_type='useful' and 'not_useful' — same as the
+      // 'explained' event addition.
+      if (hasIds) {
+        void chrome.runtime
+          .sendMessage({
+            type: 'LOG_EVENT',
+            payload: {
+              analysis_id: provocation.analysis_id as string,
+              provocation_index: provocation.provocation_index as number,
+              event_type: action,
+            },
+          })
+          .catch(() => { /* fire-and-forget */ })
+      }
+
+      if (action === 'useful') {
+        console.log('[Crith V2] marked useful:', provocation.provocation_id)
+      } else {
+        console.log('[Crith V2] marked not useful:', provocation.provocation_id)
       }
     })
   })
