@@ -3,6 +3,7 @@
 // Last verified: 2026-04-30.
 
 import { collectPriorTurns } from '../shared/dom-helpers'
+import { setInputAndSend } from '../shared/send-input'
 import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
 const SEL = {
@@ -111,16 +112,32 @@ function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
   )
 }
 
-// Streaming detection + input targeting not yet implemented for
-// Claude. Returning false from isStreaming keeps the observer in
-// pure text-stability fallback mode. Returning false from sendToInput
-// surfaces "Ask AI not available on this platform yet" in the card.
+// Generic streaming-done detection: any global "Stop" button on the
+// page indicates some message is currently generating. Combined with
+// the observer's per-node text-growth check, fires when streaming
+// flips back to a Send-style state.
 function isStreaming(_messageNode: Element): boolean {
-  return false
+  return !!document.querySelector(
+    'button[aria-label*="Stop" i], button[aria-label*="stop response" i]',
+  )
 }
-async function sendToInput(_prompt: string): Promise<boolean> {
-  console.warn('[Crith V2] sendToInput not yet implemented for claude')
-  return false
+
+const INPUT_SELECTORS = [
+  // Claude's composer is a ProseMirror contenteditable div.
+  'div.ProseMirror[contenteditable="true"]',
+  'fieldset div[contenteditable="true"]',
+  'div[contenteditable="true"][role="textbox"]',
+  '[contenteditable="true"][aria-label*="message" i]',
+] as const
+
+const SEND_BUTTON_SELECTORS = [
+  'button[aria-label="Send Message"]',
+  'button[aria-label*="Send" i]',
+  'fieldset button[type="button"][aria-disabled="false"]',
+] as const
+
+async function sendToInput(prompt: string): Promise<boolean> {
+  return setInputAndSend(INPUT_SELECTORS, SEND_BUTTON_SELECTORS, prompt)
 }
 
 export const adapter: PlatformAdapter = {

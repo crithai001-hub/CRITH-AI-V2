@@ -5,6 +5,7 @@
 // cross-conversation logo restores. Last verified: 2026-04-30.
 
 import { collectPriorTurns } from '../shared/dom-helpers'
+import { setInputAndSend } from '../shared/send-input'
 import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
 const SEL = {
@@ -103,13 +104,28 @@ function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
   )
 }
 
-// Streaming + input stubs — text-stability fallback in observer.
 function isStreaming(_messageNode: Element): boolean {
-  return false
+  return !!document.querySelector(
+    'button[aria-label*="Stop" i], button[aria-label*="stop response" i]',
+  )
 }
-async function sendToInput(_prompt: string): Promise<boolean> {
-  console.warn('[Crith V2] sendToInput not yet implemented for grok')
-  return false
+
+const INPUT_SELECTORS = [
+  'textarea[placeholder*="Ask Grok" i]',
+  'textarea[placeholder*="Ask" i]',
+  'textarea[aria-label*="message" i]',
+  'div[contenteditable="true"][role="textbox"]',
+  'textarea',
+] as const
+
+const SEND_BUTTON_SELECTORS = [
+  'button[type="submit"]',
+  'button[aria-label*="Submit" i]',
+  'button[aria-label*="Send" i]',
+] as const
+
+async function sendToInput(prompt: string): Promise<boolean> {
+  return setInputAndSend(INPUT_SELECTORS, SEND_BUTTON_SELECTORS, prompt)
 }
 
 export const adapter: PlatformAdapter = {

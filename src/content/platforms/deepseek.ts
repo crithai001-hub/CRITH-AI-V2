@@ -3,6 +3,7 @@
 // Last verified: 2026-04-30.
 
 import { collectPriorTurns } from '../shared/dom-helpers'
+import { setInputAndSend } from '../shared/send-input'
 import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
 const SEL = {
@@ -101,13 +102,30 @@ function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
   )
 }
 
-// Streaming + input stubs — text-stability fallback in observer.
 function isStreaming(_messageNode: Element): boolean {
-  return false
+  return !!document.querySelector(
+    'button[aria-label*="Stop" i], button[aria-label*="stop" i], div[role="button"][aria-label*="Stop" i]',
+  )
 }
-async function sendToInput(_prompt: string): Promise<boolean> {
-  console.warn('[Crith V2] sendToInput not yet implemented for deepseek')
-  return false
+
+const INPUT_SELECTORS = [
+  '#chat-input',
+  'textarea[placeholder*="Send" i]',
+  'textarea[placeholder*="message" i]',
+  'div[contenteditable="true"][role="textbox"]',
+  'textarea',
+] as const
+
+const SEND_BUTTON_SELECTORS = [
+  // DeepSeek often uses a div[role="button"] for send instead of <button>.
+  'div[role="button"][aria-label*="Send" i]',
+  'button[aria-label*="Send" i]',
+  'button[type="submit"]',
+  '.send-button',
+] as const
+
+async function sendToInput(prompt: string): Promise<boolean> {
+  return setInputAndSend(INPUT_SELECTORS, SEND_BUTTON_SELECTORS, prompt)
 }
 
 export const adapter: PlatformAdapter = {
