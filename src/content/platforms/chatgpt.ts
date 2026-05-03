@@ -47,7 +47,16 @@ function getChatContainer(): Element | null {
 
 function isResponseNode(node: Element): boolean {
   if (!(node instanceof HTMLElement)) return false
-  return SEL.responseNode.some((s) => node.matches(s) || !!node.querySelector(s))
+  // Direct match only. The previous `|| !!node.querySelector(s)` half
+  // returned true for outer wrappers that CONTAIN an assistant message,
+  // and the observer would attach to the wrapper. textContent on the
+  // wrapper includes UI siblings (action buttons, reasoning panels,
+  // "Continue generating") that keep mutating after the response itself
+  // stabilizes — so the text-stability poller never fired and we hit
+  // MAX_WAIT_MS abandonment. The else-branch in observer.handleAddedNode
+  // still descends into wrapper subtrees to find the canonical
+  // assistant element, so we don't lose detection.
+  return SEL.responseNode.some((s) => node.matches(s))
 }
 
 function getResponseText(node: Element): string {

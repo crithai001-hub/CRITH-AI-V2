@@ -42,7 +42,8 @@ function getChatContainer(): Element | null {
 
 function isResponseNode(node: Element): boolean {
   if (!(node instanceof HTMLElement)) return false
-  return SEL.responseNode.some((s) => node.matches(s) || !!node.querySelector(s))
+  // Direct match only — see chatgpt.ts for why.
+  return SEL.responseNode.some((s) => node.matches(s))
 }
 
 function getResponseText(node: Element): string {

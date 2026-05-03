@@ -27,7 +27,11 @@ function log(...args: unknown[]): void {
 
 const STABILITY_WINDOW_MS = 1500
 const MIN_TEXT_LENGTH = 50
-const MAX_WAIT_MS = 30000
+// Bumped from 30s → 45s so genuinely long responses (~3000+ chars
+// streamed slowly with reasoning) don't get abandoned before they
+// stabilize. The poller still gives up if the text really never
+// stops growing — just gives a wider window.
+const MAX_WAIT_MS = 45000
 const MAX_INFLIGHT = 2
 
 export type ResponseCompleteParams = {
