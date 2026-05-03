@@ -4,7 +4,8 @@
 // returns 'home' and underline-target text matching prevents
 // cross-conversation logo restores. Last verified: 2026-04-30.
 
-import type { PlatformAdapter } from '../../shared/types'
+import { collectPriorTurns } from '../shared/dom-helpers'
+import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
 const SEL = {
   chatContainer: [
@@ -93,6 +94,14 @@ function getAllResponseNodes(): Element[] {
   return out
 }
 
+function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
+  return collectPriorTurns(
+    SEL.responseNode,
+    SEL.promptNodeForResponse,
+    currentResponseNode,
+  )
+}
+
 export const adapter: PlatformAdapter = {
   name: 'grok',
   getChatContainer,
@@ -101,4 +110,5 @@ export const adapter: PlatformAdapter = {
   getPromptForResponse,
   getSessionId,
   getAllResponseNodes,
+  getPriorTurns,
 }

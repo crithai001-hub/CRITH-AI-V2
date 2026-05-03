@@ -2,7 +2,8 @@
 // Ported verbatim from V1's provocations/platforms/claude.js.
 // Last verified: 2026-04-30.
 
-import type { PlatformAdapter } from '../../shared/types'
+import { collectPriorTurns } from '../shared/dom-helpers'
+import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
 const SEL = {
   chatContainer: [
@@ -100,6 +101,14 @@ function getAllResponseNodes(): Element[] {
   return out
 }
 
+function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
+  return collectPriorTurns(
+    SEL.responseNode,
+    SEL.promptNodeForResponse,
+    currentResponseNode,
+  )
+}
+
 export const adapter: PlatformAdapter = {
   name: 'claude',
   getChatContainer,
@@ -108,4 +117,5 @@ export const adapter: PlatformAdapter = {
   getPromptForResponse,
   getSessionId,
   getAllResponseNodes,
+  getPriorTurns,
 }

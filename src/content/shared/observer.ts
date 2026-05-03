@@ -17,7 +17,7 @@
 // /Users/huseyn/Documents/CRITH AI MVP/provocations/observer.js for the
 // reference implementation.
 
-import type { PlatformAdapter } from '../../shared/types'
+import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
 const DEBUG = true
 const LOG_PREFIX = '[Crith V2 PROV]'
@@ -35,6 +35,12 @@ export type ResponseCompleteParams = {
   prompt: string
   response: string
   sessionId: string
+  /**
+   * Prior turns of the conversation, oldest-first. Capped at 6 turns
+   * and 1500 chars per turn by the adapter's getPriorTurns. Empty
+   * array on first turn or when the DOM walk found nothing.
+   */
+  priorTurns: ConversationTurn[]
 }
 export type ResponseCompleteHandler = (params: ResponseCompleteParams) => Promise<void>
 
@@ -172,18 +178,25 @@ function attachToResponse(node: Element): void {
       const responseText = adapter.getResponseText(node)
       const promptText = adapter.getPromptForResponse(node)
       const sessionId = adapter.getSessionId()
+      const priorTurns = adapter.getPriorTurns(node)
+      const priorChars = priorTurns.reduce(
+        (sum, t) => sum + t.content.length,
+        0,
+      )
       log(
         'fire — stable at len:', newLength,
         '| promptText len:', promptText?.length ?? 0,
         '| responseText len:', responseText?.length ?? 0,
         '| sessionId:', sessionId,
+        '| priorTurns:', priorTurns.length,
+        '| priorChars:', priorChars,
       )
       cleanup(node)
       if (!responseText || !promptText) {
         log('fire dropped — empty prompt or response')
         return
       }
-      enqueueGeneration(node, promptText, responseText, sessionId)
+      enqueueGeneration(node, promptText, responseText, sessionId, priorTurns)
       return
     }
 
@@ -234,6 +247,7 @@ function enqueueGeneration(
   prompt: string,
   response: string,
   sessionId: string,
+  priorTurns: ConversationTurn[],
 ): void {
   if (inflight.length >= MAX_INFLIGHT) {
     const dropped = inflight.shift()
@@ -252,7 +266,7 @@ function enqueueGeneration(
     return
   }
 
-  void handler({ node, prompt, response, sessionId })
+  void handler({ node, prompt, response, sessionId, priorTurns })
     .catch((err) => log('onResponseComplete handler threw:', err))
     .finally(() => {
       const i = inflight.indexOf(entry)

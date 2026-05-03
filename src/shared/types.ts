@@ -61,12 +61,29 @@ export type Provocation = {
 
 // ── /api/analyze-response ────────────────────────────────────
 
+/**
+ * One prior message in the conversation that led up to the message
+ * being analyzed. Sent as `conversation_history` so the analyzer can
+ * stop falsely flagging things the user already specified earlier.
+ */
+export type ConversationTurn = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export type AnalyzeRequest = {
   prompt: string
   response: string
   platform: Platform
   conversation_id: string
   message_id: string
+  /**
+   * Last 6 prior turns in oldest-first order. Each `content` is capped
+   * at 1500 chars (truncated with a `[...]` suffix). Empty array OR
+   * field omitted are equivalent — backend treats both as
+   * single-turn analysis.
+   */
+  conversation_history?: ConversationTurn[]
 }
 
 export type AnalyzeResponseSuccess = {
@@ -169,4 +186,11 @@ export type PlatformAdapter = {
   getSessionId: () => string
   /** Every AI-response Element currently in the DOM, deduped. */
   getAllResponseNodes: () => Element[]
+  /**
+   * Walk the DOM backward from `currentResponseNode` to collect prior
+   * turns of the conversation. Returns oldest-first, last 6 max,
+   * each turn's content capped at 1500 chars. Empty array on first
+   * turn or when DOM walk can't locate any priors.
+   */
+  getPriorTurns: (currentResponseNode: Element) => ConversationTurn[]
 }

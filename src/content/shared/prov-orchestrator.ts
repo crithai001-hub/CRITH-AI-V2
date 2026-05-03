@@ -26,6 +26,7 @@ import { isApiError } from '../../shared/api-client'
 import type {
   AnalyzeResponse,
   ApiError,
+  ConversationTurn,
   Lens,
   Platform,
   PlatformAdapter,
@@ -111,8 +112,9 @@ async function handleResponseComplete(params: {
   prompt: string
   response: string
   sessionId: string
+  priorTurns: ConversationTurn[]
 }): Promise<void> {
-  const { node, prompt, response, sessionId } = params
+  const { node, prompt, response, sessionId, priorTurns } = params
   const platformName = adapter?.name ?? 'unknown'
 
   // Synthetic message_id. Platforms expose per-message IDs differently
@@ -133,6 +135,9 @@ async function handleResponseComplete(params: {
         platform: platformName as Platform,
         conversation_id: sessionId,
         message_id: messageId,
+        // Adapter already capped at 6 turns × 1500 chars; mirror the
+        // server's lib/validate-history.ts. Empty array on first turn.
+        conversation_history: priorTurns,
       },
     })) as AnalyzeResponse | ApiError
   } catch (err) {
