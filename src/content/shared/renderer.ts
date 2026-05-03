@@ -119,24 +119,17 @@ const SHADOW_STYLES = `
     font-size: 12px;
     color: #c1272d;
   }
-  /* Two-row layout: meta row (Useful / Not useful / Why this matters)
-     on top, action row (Ask AI →) on the bottom. Putting Ask AI on
-     its own row gives it visual prominence proportional to its
-     significance — it's the action that turns a flagged gap into the
-     user actually pushing back. */
+  /* Single-row layout: ratings cluster on the left, Ask AI on the
+     right (margin-left: auto pushes the primary to the edge). The
+     "Why this matters" button was removed; the validation problem
+     text already does what explain was for. */
   .card .controls {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .card .controls .meta-row {
     display: flex;
     gap: 6px;
     align-items: center;
   }
-  .card .controls .action-row {
-    display: flex;
-    justify-content: flex-end;
+  .card .controls .btn-primary {
+    margin-left: auto;
   }
   .card .controls button {
     font: inherit;
@@ -194,23 +187,14 @@ const SHADOW_STYLES = `
     background: rgba(0, 0, 0, 0.11);
   }
 
-  /* Tertiary — "Why this matters". Accent-tinted outline. Pushed to the
-     right edge of the meta-row via margin-left: auto so the ratings
-     cluster on the left. */
+  /* Tertiary style retained but no longer used — kept in case a
+     future card variant needs it. */
   .card .controls .btn-tertiary {
     background: transparent;
     color: var(--crith-prov-color, #4F46E5);
     border-color: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 28%, transparent);
-    margin-left: auto;
     font-size: 11.5px;
     padding: 5px 10px;
-  }
-  .card .controls .btn-tertiary:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 8%, transparent);
-    border-color: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 48%, transparent);
-  }
-  .card .controls .btn-tertiary:active:not(:disabled) {
-    background: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 14%, transparent);
   }
 
   /* Marker for the rating button the user chose. Shown as a leading
@@ -222,9 +206,9 @@ const SHADOW_STYLES = `
     font-weight: 600;
   }
 
-  /* Smaller meta-row buttons (Useful / Not useful) — visually
-     subordinate to the Ask AI primary on the action row. */
-  .card .controls .meta-row .btn-secondary {
+  /* Smaller secondary buttons (Useful / Not useful) — visually
+     subordinate to the Ask AI primary. */
+  .card .controls .btn-secondary {
     font-size: 11.5px;
     padding: 5px 10px;
   }
@@ -508,37 +492,24 @@ function createHost(
   const controls = document.createElement('div')
   controls.className = 'controls'
 
-  // Meta row — Useful / Not useful (both rating-as-feedback) and Why
-  // this matters (tertiary, pushed right via margin-left: auto).
-  const metaRow = document.createElement('div')
-  metaRow.className = 'meta-row'
-  const metaButtons: Array<{ cls: string; action: string; label: string }> = [
+  // Single row: ratings on the left, Ask AI primary on the right.
+  // "Why this matters" was removed — the validation's `problem` text
+  // is the explanation. Ask AI is disabled at attach time in card.ts
+  // when follow_up_prompt is empty (legacy responses) or the platform
+  // adapter doesn't implement sendToInput.
+  const buttons: Array<{ cls: string; action: string; label: string }> = [
     { cls: 'btn-secondary', action: 'useful',     label: 'Useful' },
     { cls: 'btn-secondary', action: 'not_useful', label: 'Not useful' },
-    { cls: 'btn-tertiary',  action: 'explain',    label: 'Why this matters' },
+    { cls: 'btn-primary',   action: 'ask_ai',     label: 'Ask AI →' },
   ]
-  for (const b of metaButtons) {
+  for (const b of buttons) {
     const btn = document.createElement('button')
     btn.className = b.cls
     btn.setAttribute('data-action', b.action)
     btn.setAttribute('aria-label', b.label)
     btn.textContent = b.label
-    metaRow.appendChild(btn)
+    controls.appendChild(btn)
   }
-  controls.appendChild(metaRow)
-
-  // Action row — Ask AI primary. When the validation has no
-  // follow_up_prompt (legacy provocations response, or v14+ with an
-  // empty field), the button is disabled at attach time in card.ts.
-  const actionRow = document.createElement('div')
-  actionRow.className = 'action-row'
-  const askAiBtn = document.createElement('button')
-  askAiBtn.className = 'btn-primary'
-  askAiBtn.setAttribute('data-action', 'ask_ai')
-  askAiBtn.setAttribute('aria-label', 'Send the follow-up prompt to the AI')
-  askAiBtn.textContent = 'Ask AI →'
-  actionRow.appendChild(askAiBtn)
-  controls.appendChild(actionRow)
 
   card.appendChild(controls)
   wrap.appendChild(card)
