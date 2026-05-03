@@ -157,8 +157,27 @@ async function handleResponseComplete(params: {
     return
   }
 
+  // Defensive shape check. The TS type is a discriminated union, but
+  // at runtime the backend can return anything — including JSON shapes
+  // the api-client doesn't recognize as an ApiError (e.g. an HTTP 200
+  // with `{error: "..."}` body, or a malformed v13 response missing
+  // the provocations field). Without this guard the next branch would
+  // throw "Cannot read properties of undefined (reading 'length')".
+  if (typeof result !== 'object' || result === null) {
+    log('ANALYZE returned non-object result, skipping render', result)
+    return
+  }
+
   if (result.skip) {
     log(`ANALYZE skip${'reason' in result && result.reason ? ` (${result.reason})` : ''}`)
+    return
+  }
+
+  if (!Array.isArray(result.provocations)) {
+    log(
+      'ANALYZE response missing provocations array (skip not set, malformed shape) — skipping render',
+      result,
+    )
     return
   }
 
