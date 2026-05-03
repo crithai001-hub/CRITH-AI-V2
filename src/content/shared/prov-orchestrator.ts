@@ -218,7 +218,16 @@ async function handleResponseComplete(params: {
   }
 
   if (validations.length === 0) {
-    log('ANALYZE returned skip=false but validations array is empty')
+    // Most likely cause: backend's anchored_to validator stripped every
+    // candidate (LLM returned paraphrased anchors that didn't survive
+    // the response.includes() check). Less likely: prompt's
+    // high-quality path returned skip=false with no items. Either way,
+    // nothing to render — log the full result + the response we sent
+    // so we can debug from the page console.
+    log(
+      'ANALYZE returned skip=false but validations array is empty — likely backend dropped all candidates for failing the verbatim anchored_to check',
+      { result, response_chars: response.length, response_head: response.slice(0, 200) },
+    )
     return
   }
 
