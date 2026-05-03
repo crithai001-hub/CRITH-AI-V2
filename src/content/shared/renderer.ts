@@ -17,7 +17,7 @@
 //   - 'verification' renamed to 'hallucination'.
 
 import { attach as attachCard } from './card'
-import type { Lens, Provocation } from '../../shared/types'
+import type { Lens, Validation } from '../../shared/types'
 
 const DEBUG = true
 const LOG_PREFIX = '[Crith V2 PROV RENDER]'
@@ -119,10 +119,24 @@ const SHADOW_STYLES = `
     font-size: 12px;
     color: #c1272d;
   }
+  /* Two-row layout: meta row (Useful / Not useful / Why this matters)
+     on top, action row (Ask AI →) on the bottom. Putting Ask AI on
+     its own row gives it visual prominence proportional to its
+     significance — it's the action that turns a flagged gap into the
+     user actually pushing back. */
   .card .controls {
     display: flex;
+    flex-direction: column;
     gap: 8px;
+  }
+  .card .controls .meta-row {
+    display: flex;
+    gap: 6px;
     align-items: center;
+  }
+  .card .controls .action-row {
+    display: flex;
+    justify-content: flex-end;
   }
   .card .controls button {
     font: inherit;
@@ -180,13 +194,16 @@ const SHADOW_STYLES = `
     background: rgba(0, 0, 0, 0.11);
   }
 
-  /* Tertiary — "Why this matters". Accent-tinted, pushed to the right
-     edge via margin-left: auto so the ratings cluster on the left. */
+  /* Tertiary — "Why this matters". Accent-tinted outline. Pushed to the
+     right edge of the meta-row via margin-left: auto so the ratings
+     cluster on the left. */
   .card .controls .btn-tertiary {
     background: transparent;
     color: var(--crith-prov-color, #4F46E5);
     border-color: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 28%, transparent);
     margin-left: auto;
+    font-size: 11.5px;
+    padding: 5px 10px;
   }
   .card .controls .btn-tertiary:hover:not(:disabled) {
     background: color-mix(in srgb, var(--crith-prov-color, #4F46E5) 8%, transparent);
@@ -203,6 +220,13 @@ const SHADOW_STYLES = `
   .card .controls button.is-chosen::before {
     content: '\\2713\\00a0';
     font-weight: 600;
+  }
+
+  /* Smaller meta-row buttons (Useful / Not useful) — visually
+     subordinate to the Ask AI primary on the action row. */
+  .card .controls .meta-row .btn-secondary {
+    font-size: 11.5px;
+    padding: 5px 10px;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -279,15 +303,15 @@ function isHighSignalLens(lens: Lens): boolean {
 }
 
 /**
- * Render an array of provocations against a single response node. Each
+ * Render an array of validations against a single response node. Each
  * gets its own underline + shadow-DOM host, stacked vertically.
  */
-export function show(responseNode: Element, provocations: Provocation[]): void {
-  if (!Array.isArray(provocations) || provocations.length === 0) return
+export function show(responseNode: Element, validations: Validation[]): void {
+  if (!Array.isArray(validations) || validations.length === 0) return
   let stackIndex = 0
-  for (const provocation of provocations) {
-    if (!provocation) continue
-    const provocationId = provocation.provocation_id
+  for (const validation of validations) {
+    if (!validation) continue
+    const provocationId = validation.provocation_id
     if (!provocationId) continue
 
     // Idempotency: skip if a host for this provocation id already exists.
@@ -296,7 +320,7 @@ export function show(responseNode: Element, provocations: Provocation[]): void {
       if (document.querySelector(sel)) { stackIndex++; continue }
     } catch { /* noop */ }
 
-    const target = provocation.anchored_to || ''
+    const target = validation.anchored_to || ''
 
     // Dedupe by anchored_to — replace any prior render that targets the
     // same phrase (handles outer/inner wrapper double-fire on ChatGPT).
@@ -314,12 +338,12 @@ export function show(responseNode: Element, provocations: Provocation[]): void {
       })
     }
 
-    const spans = wrapUnderline(responseNode, provocation.anchored_to, provocation.lens)
+    const spans = wrapUnderline(responseNode, validation.anchored_to, validation.lens)
     if (spans.length === 0) continue
     const firstSpan = spans[0]
     if (!firstSpan) continue
 
-    const host = createHost(provocationId, provocation, spans)
+    const host = createHost(provocationId, validation, spans)
     if (target) host.setAttribute('data-target', target)
     host.setAttribute('data-stack-index', String(stackIndex))
     document.body.appendChild(host)
@@ -408,7 +432,7 @@ type HostWithShadow = HTMLElement & { shadowRootClosed?: ShadowRoot }
 
 function createHost(
   provocationId: string,
-  provocation: Provocation,
+  validation: Validation,
   underlineSpans: HTMLSpanElement[],
 ): HostWithShadow {
   const host = document.createElement('crith-prov-host') as HostWithShadow
@@ -433,7 +457,7 @@ function createHost(
   logo.title = 'Crith provocation'
   logo.appendChild(buildBrandMark())
 
-  const dotColor = getDotColor(provocation.lens)
+  const dotColor = getDotColor(validation.lens)
   if (dotColor) {
     const dot = document.createElement('div')
     dot.className = 'crith-prov-dot'
@@ -459,11 +483,12 @@ function createHost(
   backLink.hidden = true
   card.appendChild(backLink)
 
-  // Main text — holds question text by default, swapped to the
-  // explanation while in the explained state.
+  // Main text — holds the validation's `problem` text by default
+  // (1-2 sentence declarative statement of what the AI did wrong),
+  // swapped to the explanation while in the explained state.
   const text = document.createElement('p')
   text.className = 'text'
-  text.textContent = (provocation.question || '').slice(0, 220)
+  text.textContent = (validation.problem || '').slice(0, 320)
   card.appendChild(text)
 
   // Loading indicator while EXPLAIN_PROVOCATION is in flight.
@@ -483,29 +508,43 @@ function createHost(
   const controls = document.createElement('div')
   controls.className = 'controls'
 
-  // V2 buttons. Layout: ratings cluster on the left, the "Why this
-  // matters" button is pushed to the right via .btn-tertiary's
-  // margin-left: auto. Useful is primary (filled accent) since
-  // affirmative ratings carry the heavier signal for prompt tuning.
-  const buttons: Array<{ cls: string; action: string; label: string }> = [
-    { cls: 'btn-primary',   action: 'useful',     label: 'Useful' },
+  // Meta row — Useful / Not useful (both rating-as-feedback) and Why
+  // this matters (tertiary, pushed right via margin-left: auto).
+  const metaRow = document.createElement('div')
+  metaRow.className = 'meta-row'
+  const metaButtons: Array<{ cls: string; action: string; label: string }> = [
+    { cls: 'btn-secondary', action: 'useful',     label: 'Useful' },
     { cls: 'btn-secondary', action: 'not_useful', label: 'Not useful' },
     { cls: 'btn-tertiary',  action: 'explain',    label: 'Why this matters' },
   ]
-  for (const b of buttons) {
+  for (const b of metaButtons) {
     const btn = document.createElement('button')
     btn.className = b.cls
     btn.setAttribute('data-action', b.action)
     btn.setAttribute('aria-label', b.label)
     btn.textContent = b.label
-    controls.appendChild(btn)
+    metaRow.appendChild(btn)
   }
+  controls.appendChild(metaRow)
+
+  // Action row — Ask AI primary. When the validation has no
+  // follow_up_prompt (legacy provocations response, or v14+ with an
+  // empty field), the button is disabled at attach time in card.ts.
+  const actionRow = document.createElement('div')
+  actionRow.className = 'action-row'
+  const askAiBtn = document.createElement('button')
+  askAiBtn.className = 'btn-primary'
+  askAiBtn.setAttribute('data-action', 'ask_ai')
+  askAiBtn.setAttribute('aria-label', 'Send the follow-up prompt to the AI')
+  askAiBtn.textContent = 'Ask AI →'
+  actionRow.appendChild(askAiBtn)
+  controls.appendChild(actionRow)
 
   card.appendChild(controls)
   wrap.appendChild(card)
   root.appendChild(wrap)
 
-  attachCard(host, root, provocation, underlineSpans)
+  attachCard(host, root, validation, underlineSpans)
   return host
 }
 

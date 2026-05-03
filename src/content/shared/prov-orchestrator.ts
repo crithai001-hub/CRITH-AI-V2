@@ -16,6 +16,7 @@
 
 import * as observer from './observer'
 import { show as rendererShow } from './renderer'
+import { setCardAdapter } from './card'
 import { adapter as chatgptAdapter } from '../platforms/chatgpt'
 import { adapter as claudeAdapter } from '../platforms/claude'
 import { adapter as geminiAdapter } from '../platforms/gemini'
@@ -31,6 +32,7 @@ import type {
   Platform,
   PlatformAdapter,
   Provocation,
+  Validation,
 } from '../../shared/types'
 
 const DEBUG = true
@@ -81,7 +83,18 @@ type ReviewEntry = {
   platform: string
   prompt: string
   response: string
-  provocation: { question: string; lens: Lens; anchored_to: string }
+  /**
+   * Captured for human review on the dashboard. We keep `question` as
+   * the field name for backward compat with prior log entries, but its
+   * value now holds the v14+ `problem` text. `follow_up_prompt` is the
+   * new Ask AI prompt; empty string for legacy provocations.
+   */
+  provocation: {
+    question: string
+    follow_up_prompt: string
+    lens: Lens
+    anchored_to: string
+  }
   sessionId: string
 }
 
@@ -173,40 +186,68 @@ async function handleResponseComplete(params: {
     return
   }
 
-  if (!Array.isArray(result.provocations)) {
+  // Backend may return either `validations` (v14+) or legacy
+  // `provocations`. Prefer validations; fall back to provocations and
+  // normalize fields. If neither is present, treat as malformed.
+  const rawValidations = (result as { validations?: Validation[] }).validations
+  const rawProvocations = (result as { provocations?: Provocation[] }).provocations
+
+  let validations: Validation[]
+  if (Array.isArray(rawValidations)) {
+    validations = rawValidations
+  } else if (Array.isArray(rawProvocations)) {
+    // Legacy: map question → problem, no follow_up_prompt available.
+    // Ask AI will be disabled on these (empty follow_up_prompt).
+    validations = rawProvocations.map((p) => ({
+      provocation_id: p.provocation_id,
+      analysis_id: p.analysis_id,
+      provocation_index: p.provocation_index,
+      problem: p.question,
+      follow_up_prompt: '',
+      lens: p.lens,
+      anchored_to: p.anchored_to,
+      severity: p.severity,
+    }))
+    log('ANALYZE: backend returned legacy `provocations` shape — normalized to validations (Ask AI disabled)')
+  } else {
     log(
-      'ANALYZE response missing provocations array (skip not set, malformed shape) — skipping render',
+      'ANALYZE response missing both validations and provocations — skipping render',
       result,
     )
     return
   }
 
-  if (result.provocations.length === 0) {
-    log('ANALYZE returned skip=false but provocations array is empty')
+  if (validations.length === 0) {
+    log('ANALYZE returned skip=false but validations array is empty')
     return
   }
 
   // Inject provocation_id from analysis_id + index if the backend
   // didn't supply one. Renderer needs it for idempotency / dedup.
-  // analysis_id and provocation_index are stamped onto each provocation
-  // so the card's Explain handler can call EXPLAIN_PROVOCATION /
-  // LOG_EVENT without re-deriving them.
-  const provocations: Provocation[] = result.provocations.map((p, i) => ({
-    ...p,
-    provocation_id: p.provocation_id ?? `${result.analysis_id}-${i}`,
+  // analysis_id and provocation_index are stamped onto each entry so
+  // the card's Explain / Ask AI / LOG_EVENT handlers can use them
+  // without re-deriving.
+  const enriched: Validation[] = validations.map((v, i) => ({
+    ...v,
+    provocation_id: v.provocation_id ?? `${result.analysis_id}-${i}`,
     analysis_id: result.analysis_id,
     provocation_index: i,
   }))
 
   // Log every triple to storage for the review dashboard. Fire-and-
   // forget — never block render on the storage round-trip.
-  for (const p of provocations) {
+  for (const v of enriched) {
     void appendReviewLog({
       timestamp: Date.now(),
       platform: platformName,
       prompt,
       response,
-      provocation: { question: p.question, lens: p.lens, anchored_to: p.anchored_to },
+      provocation: {
+        question: v.problem,
+        follow_up_prompt: v.follow_up_prompt,
+        lens: v.lens,
+        anchored_to: v.anchored_to,
+      },
       sessionId,
     })
   }
@@ -214,13 +255,14 @@ async function handleResponseComplete(params: {
   // Inline-stringified so the preview is readable in the console without
   // having to expand a collapsed Array(N).
   log(
-    'rendering ' + JSON.stringify(provocations.map((p) => ({
-      lens: p.lens,
-      anchor_len: p.anchored_to.length,
-      anchor_preview: p.anchored_to.slice(0, 80),
+    'rendering ' + JSON.stringify(enriched.map((v) => ({
+      lens: v.lens,
+      problem_len: v.problem.length,
+      follow_up_len: v.follow_up_prompt.length,
+      anchor_preview: v.anchored_to.slice(0, 80),
     }))),
   )
-  rendererShow(node, provocations)
+  rendererShow(node, enriched)
 }
 
 // ── SPA URL-change watcher ───────────────────────────────────
@@ -246,6 +288,10 @@ if (adapter) {
     document.documentElement.style.setProperty('--crith-prov-color', color)
   }
   log(`booting on ${location.hostname} | adapter="${adapter.name}" | color=${color ?? '(default)'}`)
+
+  // Hand the adapter to card.ts so its Ask AI button knows where to
+  // route the follow-up prompt.
+  setCardAdapter(adapter)
 
   observer.start(adapter, handleResponseComplete)
 

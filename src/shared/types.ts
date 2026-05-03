@@ -32,28 +32,37 @@ export type Lens = string
 /** Severity tier — fixed by the system prompt; not forward-compat. */
 export type Severity = 'low' | 'medium' | 'high'
 
+/**
+ * Canonical post-v14 shape (sent by the backend as `validations`).
+ * `problem` is a 1-2 sentence declarative statement of what the AI did
+ * wrong (≤300 chars). `follow_up_prompt` is the first-person prompt
+ * the user can fire back at the AI on Ask AI (≤450 chars).
+ */
+export type Validation = {
+  provocation_id?: string | undefined
+  analysis_id?: string | undefined
+  provocation_index?: number | undefined
+  /** 1-2 sentence statement, declarative. Shown in the card body. */
+  problem: string
+  /** Ready-to-fire prompt for Ask AI. Empty string disables the button. */
+  follow_up_prompt: string
+  lens: Lens
+  /** Verbatim substring of the AI response. Renderer wraps it with an underline. */
+  anchored_to: string
+  severity?: Severity | undefined
+}
+
+/**
+ * Legacy pre-v14 shape (was sent as `provocations`). The orchestrator
+ * normalizes any incoming `provocations` array into Validation by
+ * mapping question → problem and follow_up_prompt = ''. Kept in the
+ * type system only for the response-shape fallback during rollout.
+ */
 export type Provocation = {
-  /**
-   * Stable per-provocation id. Backend may return it; if absent the
-   * orchestrator injects `${analysis_id}-${index}` before passing to the
-   * renderer. Renderer uses it for idempotency keys and dedup.
-   */
   provocation_id?: string
-  /**
-   * Analysis-level id this provocation belongs to. Set by the
-   * orchestrator from AnalyzeResponseSuccess.analysis_id when mapping
-   * the response. Used by EXPLAIN_PROVOCATION + LOG_EVENT calls.
-   */
   analysis_id?: string
-  /**
-   * Index of this provocation within the analysis_id's provocations
-   * array. Set by the orchestrator. Used as the second key for
-   * EXPLAIN_PROVOCATION + LOG_EVENT calls.
-   */
   provocation_index?: number
-  /** The provocation text shown in the card. */
   question: string
-  /** Verbatim substring of the AI response to wrap with the underline. */
   anchored_to: string
   lens: Lens
   severity?: Severity
@@ -88,7 +97,10 @@ export type AnalyzeRequest = {
 
 export type AnalyzeResponseSuccess = {
   skip: false
-  provocations: Provocation[]
+  /** Canonical post-v14 array. Preferred when present. */
+  validations?: Validation[]
+  /** Legacy pre-v14 array. Used as a fallback for older deploys. */
+  provocations?: Provocation[]
   analysis_id: string
 }
 
@@ -110,6 +122,7 @@ export type EventType =
   | 'explained'
   | 'useful'
   | 'not_useful'
+  | 'asked_ai'
 
 export type EventRequest = {
   analysis_id: string
@@ -193,4 +206,20 @@ export type PlatformAdapter = {
    * turn or when DOM walk can't locate any priors.
    */
   getPriorTurns: (currentResponseNode: Element) => ConversationTurn[]
+  /**
+   * Per-message streaming-state probe. Returns true while the AI is
+   * still generating into `messageNode` and false when generation has
+   * completed. Treated as the PRIMARY fire signal — when isStreaming
+   * was true and is now false, the observer fires immediately. Adapters
+   * that can't reliably detect streaming should return false at all
+   * times; the observer falls back to text-stability detection.
+   */
+  isStreaming: (messageNode: Element) => boolean
+  /**
+   * Programmatically set the platform's input field to `prompt` and
+   * submit it (the same effect as the user typing + clicking send).
+   * Returns true on success, false if the input or send button can't
+   * be found / can't be triggered. Used by the card's "Ask AI" button.
+   */
+  sendToInput: (prompt: string) => Promise<boolean>
 }

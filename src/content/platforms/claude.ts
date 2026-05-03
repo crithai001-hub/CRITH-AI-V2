@@ -111,6 +111,18 @@ function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
   )
 }
 
+// Streaming detection + input targeting not yet implemented for
+// Claude. Returning false from isStreaming keeps the observer in
+// pure text-stability fallback mode. Returning false from sendToInput
+// surfaces "Ask AI not available on this platform yet" in the card.
+function isStreaming(_messageNode: Element): boolean {
+  return false
+}
+async function sendToInput(_prompt: string): Promise<boolean> {
+  console.warn('[Crith V2] sendToInput not yet implemented for claude')
+  return false
+}
+
 export const adapter: PlatformAdapter = {
   name: 'claude',
   getChatContainer,
@@ -120,4 +132,6 @@ export const adapter: PlatformAdapter = {
   getSessionId,
   getAllResponseNodes,
   getPriorTurns,
+  isStreaming,
+  sendToInput,
 }

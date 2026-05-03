@@ -100,6 +100,15 @@ function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
   )
 }
 
+// Streaming + input stubs — text-stability fallback in observer.
+function isStreaming(_messageNode: Element): boolean {
+  return false
+}
+async function sendToInput(_prompt: string): Promise<boolean> {
+  console.warn('[Crith V2] sendToInput not yet implemented for gemini')
+  return false
+}
+
 export const adapter: PlatformAdapter = {
   name: 'gemini',
   getChatContainer,
@@ -109,4 +118,6 @@ export const adapter: PlatformAdapter = {
   getSessionId,
   getAllResponseNodes,
   getPriorTurns,
+  isStreaming,
+  sendToInput,
 }

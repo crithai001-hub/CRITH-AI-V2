@@ -159,17 +159,52 @@ function attachToResponse(node: Element): void {
     cursor = cursor.parentElement
   }
 
-  // Text-stability polling. Streaming UIs across the six target platforms
-  // expose neither a uniform nor reliable "still generating" signal, so
-  // we fire only when node.textContent length stops growing for one
-  // STABILITY_WINDOW_MS AND has reached MIN_TEXT_LENGTH chars (filters
-  // out the brief pre-content stub render before streaming begins). Cap
-  // total wait at MAX_WAIT_MS so a stalled stream doesn't pin a poller
-  // forever.
+  // Two-signal fire detection:
+  //
+  // (1) Streaming-class transition (preferred). Adapter's isStreaming()
+  //     reads platform-specific signals — per-message classes, the
+  //     global stop-button presence, etc. When that probe goes from
+  //     true → false, generation is done. This is fast and reliable
+  //     when the adapter implements it; ChatGPT does, others stub.
+  //
+  // (2) Text-stability fallback. Node.textContent length stops growing
+  //     for one STABILITY_WINDOW_MS AND has reached MIN_TEXT_LENGTH.
+  //     Used when the adapter's streaming probe never returns true
+  //     (selector drift, never-streaming case, or stub).
+  //
+  // We deliberately suppress the stability fallback while streaming
+  // class is currently active — mid-stream pauses (model computing
+  // next tokens) look like stability, but firing then would clip the
+  // response. Cap total wait at MAX_WAIT_MS so a never-ending stream
+  // doesn't pin a poller forever.
   const startedAt = Date.now()
   let currentLength = (node.textContent ?? '').length
+  let sawStreamingClass = false
   let aborted = false
   let timer: ReturnType<typeof setTimeout> | null = null
+
+  const fireNow = (newLength: number, trigger: 'streaming-done' | 'text-stable'): void => {
+    if (!adapter) return
+    const responseText = adapter.getResponseText(node)
+    const promptText = adapter.getPromptForResponse(node)
+    const sessionId = adapter.getSessionId()
+    const priorTurns = adapter.getPriorTurns(node)
+    const priorChars = priorTurns.reduce((sum, t) => sum + t.content.length, 0)
+    log(
+      `fire — trigger: ${trigger} | stable at len:`, newLength,
+      '| promptText len:', promptText?.length ?? 0,
+      '| responseText len:', responseText?.length ?? 0,
+      '| sessionId:', sessionId,
+      '| priorTurns:', priorTurns.length,
+      '| priorChars:', priorChars,
+    )
+    cleanup(node)
+    if (!responseText || !promptText) {
+      log('fire dropped — empty prompt or response')
+      return
+    }
+    enqueueGeneration(node, promptText, responseText, sessionId, priorTurns)
+  }
 
   const tick = (): void => {
     if (aborted) return
@@ -177,30 +212,26 @@ function attachToResponse(node: Element): void {
     const newLength = (node.textContent ?? '').length
     const elapsedMs = Date.now() - startedAt
 
-    if (newLength === currentLength && newLength >= MIN_TEXT_LENGTH) {
-      // Stable AND long enough — fire.
-      const responseText = adapter.getResponseText(node)
-      const promptText = adapter.getPromptForResponse(node)
-      const sessionId = adapter.getSessionId()
-      const priorTurns = adapter.getPriorTurns(node)
-      const priorChars = priorTurns.reduce(
-        (sum, t) => sum + t.content.length,
-        0,
-      )
-      log(
-        'fire — stable at len:', newLength,
-        '| promptText len:', promptText?.length ?? 0,
-        '| responseText len:', responseText?.length ?? 0,
-        '| sessionId:', sessionId,
-        '| priorTurns:', priorTurns.length,
-        '| priorChars:', priorChars,
-      )
-      cleanup(node)
-      if (!responseText || !promptText) {
-        log('fire dropped — empty prompt or response')
-        return
-      }
-      enqueueGeneration(node, promptText, responseText, sessionId, priorTurns)
+    const streamingNow = adapter.isStreaming(node)
+    if (streamingNow) sawStreamingClass = true
+
+    // Fire condition 1: streaming class transition (was true, now false).
+    if (sawStreamingClass && !streamingNow && newLength >= MIN_TEXT_LENGTH) {
+      fireNow(newLength, 'streaming-done')
+      return
+    }
+
+    // Fire condition 2: text-stability fallback. Suppressed when the
+    // streaming class is currently true — that's a mid-stream token
+    // pause, not a real "done". Falls through when streaming class is
+    // false (signal unsupported on this platform OR generation actually
+    // ended without us catching the class transition).
+    if (
+      !streamingNow &&
+      newLength === currentLength &&
+      newLength >= MIN_TEXT_LENGTH
+    ) {
+      fireNow(newLength, 'text-stable')
       return
     }
 
@@ -210,6 +241,7 @@ function attachToResponse(node: Element): void {
       log(
         'fire abandoned — text never stabilized within',
         MAX_WAIT_MS, 'ms | last len:', newLength,
+        '| sawStreamingClass:', sawStreamingClass,
       )
       cleanup(node)
       return

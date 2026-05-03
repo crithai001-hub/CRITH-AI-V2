@@ -74,8 +74,11 @@ async function handleMessage(message: IncomingMessage): Promise<unknown> {
       } else if (result.skip) {
         console.log(`${LOG_PREFIX} ANALYZE skip reason="${result.reason ?? ''}"`)
       } else {
+        const itemCount =
+          result.validations?.length ?? result.provocations?.length ?? 0
+        const shape = result.validations ? 'validations' : 'provocations'
         console.log(
-          `${LOG_PREFIX} ANALYZE ok provocations=${result.provocations.length} ` +
+          `${LOG_PREFIX} ANALYZE ok ${shape}=${itemCount} ` +
             `analysis_id=${result.analysis_id}`,
         )
       }

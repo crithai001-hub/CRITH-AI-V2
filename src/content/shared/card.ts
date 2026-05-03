@@ -15,7 +15,7 @@
 // The explanation is cached on the card's local state. A second tap of
 // Explain after the user navigates back does NOT re-call the backend.
 
-import type { ApiError, ExplainResponse, Provocation } from '../../shared/types'
+import type { ApiError, ExplainResponse, PlatformAdapter, Validation } from '../../shared/types'
 
 const COLLAPSE_GRACE_MS = 200
 const ERROR_DISPLAY_MS = 3000
@@ -40,10 +40,21 @@ function isApiErrorLike(value: unknown): value is ApiError {
 
 type CardState = 'default' | 'loading' | 'explained' | 'error'
 
+/**
+ * Adapter reference is optional. Card looks it up at attach time so
+ * the Ask AI button knows which platform to send to. When null (e.g.
+ * orchestrator hasn't found a matching adapter), the Ask AI button
+ * stays disabled and clicks console.warn.
+ */
+let cardAdapter: PlatformAdapter | null = null
+export function setCardAdapter(adapter: PlatformAdapter | null): void {
+  cardAdapter = adapter
+}
+
 export function attach(
   host: HTMLElement,
   root: ShadowRoot,
-  provocation: Provocation,
+  validation: Validation,
   extraTriggers: HTMLElement[],
 ): void {
   const _logo = root.querySelector('.crith-prov-logo') as HTMLElement | null
@@ -65,8 +76,14 @@ export function attach(
   const _usefulBtn = card.querySelector(
     'button[data-action="useful"]',
   ) as HTMLButtonElement | null
+  const _askAiBtn = card.querySelector(
+    'button[data-action="ask_ai"]',
+  ) as HTMLButtonElement | null
 
-  if (!_text || !_loader || !_errorMsg || !_backLink || !_explainBtn || !_notUsefulBtn || !_usefulBtn) {
+  if (
+    !_text || !_loader || !_errorMsg || !_backLink ||
+    !_explainBtn || !_notUsefulBtn || !_usefulBtn || !_askAiBtn
+  ) {
     return
   }
 
@@ -80,11 +97,25 @@ export function attach(
   const explainBtn = _explainBtn
   const notUsefulBtn = _notUsefulBtn
   const usefulBtn = _usefulBtn
+  const askAiBtn = _askAiBtn
 
-  const questionText = (provocation.question || '').slice(0, 220)
+  const problemText = (validation.problem || '').slice(0, 320)
+  const followUpPrompt = validation.follow_up_prompt || ''
   const hasIds =
-    typeof provocation.analysis_id === 'string' &&
-    typeof provocation.provocation_index === 'number'
+    typeof validation.analysis_id === 'string' &&
+    typeof validation.provocation_index === 'number'
+
+  // Ask AI is disabled when:
+  //   - the validation is from a legacy provocations response (no
+  //     follow_up_prompt) — empty string check
+  //   - the active platform adapter doesn't implement sendToInput
+  //     (every adapter except chatgpt currently)
+  // Either case: no useful click target. Surface as a disabled button
+  // rather than a click that no-ops silently.
+  const askAiAvailable =
+    followUpPrompt.length > 0 &&
+    cardAdapter != null &&
+    typeof cardAdapter.sendToInput === 'function'
 
   // ── Per-card state (closure-scoped — each card is independent) ──
 
@@ -108,6 +139,23 @@ export function attach(
     }
   }
 
+  /**
+   * The Ask AI flag works like a one-shot terminal action. After the
+   * user clicks Ask AI we never want them to re-click it (that would
+   * fire the same prompt to the chat twice). We also disable it when
+   * the platform doesn't support input targeting OR the validation has
+   * no follow_up_prompt.
+   */
+  let askAiFired = false
+  function applyAskAiState(): void {
+    askAiBtn.disabled = !askAiAvailable || askAiFired
+    if (!askAiAvailable && !followUpPrompt) {
+      askAiBtn.title = 'No follow-up prompt available for this validation'
+    } else if (!askAiAvailable) {
+      askAiBtn.title = `Ask AI not yet supported on ${cardAdapter?.name ?? 'this platform'}`
+    }
+  }
+
   function setState(state: CardState): void {
     cardState = state
     card.dataset.state = state
@@ -119,7 +167,7 @@ export function attach(
 
     switch (state) {
       case 'default': {
-        text.textContent = questionText
+        text.textContent = problemText
         text.hidden = false
         loader.hidden = true
         errorMsg.hidden = true
@@ -129,11 +177,12 @@ export function attach(
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
+        applyAskAiState()
         break
       }
       case 'loading': {
-        // Hide question; show "Thinking…". Not useful + Useful remain
-        // clickable so the user can bail out / rate at any time.
+        // Hide question; show "Thinking…". Not useful / Useful / Ask AI
+        // remain clickable so the user can bail out / rate at any time.
         text.hidden = true
         loader.hidden = false
         errorMsg.hidden = true
@@ -142,6 +191,7 @@ export function attach(
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
+        applyAskAiState()
         break
       }
       case 'explained': {
@@ -155,13 +205,14 @@ export function attach(
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
+        applyAskAiState()
         break
       }
       case 'error': {
         // Functionally the same UI as 'default' plus a transient
         // error line. Auto-revert after ERROR_DISPLAY_MS so the line
         // doesn't persist if the user tries again immediately.
-        text.textContent = questionText
+        text.textContent = problemText
         text.hidden = false
         loader.hidden = true
         errorMsg.hidden = false
@@ -170,6 +221,8 @@ export function attach(
         explainBtn.disabled = !hasIds
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
+        applyRatingLock()
+        applyAskAiState()
         errorTimer = setTimeout(() => {
           if (cardState === 'error') setState('default')
         }, ERROR_DISPLAY_MS)
@@ -221,8 +274,8 @@ export function attach(
     if (cardState === 'loading') return
     if (!hasIds) {
       console.warn(
-        '[Crith V2] explain: provocation missing analysis_id or provocation_index',
-        provocation,
+        '[Crith V2] explain: validation missing analysis_id or provocation_index',
+        validation,
       )
       setState('error')
       return
@@ -241,8 +294,8 @@ export function attach(
       .sendMessage({
         type: 'LOG_EVENT',
         payload: {
-          analysis_id: provocation.analysis_id as string,
-          provocation_index: provocation.provocation_index as number,
+          analysis_id: validation.analysis_id as string,
+          provocation_index: validation.provocation_index as number,
           event_type: 'explained',
         },
       })
@@ -254,12 +307,24 @@ export function attach(
       const result = (await chrome.runtime.sendMessage({
         type: 'EXPLAIN_PROVOCATION',
         payload: {
-          analysis_id: provocation.analysis_id as string,
-          provocation_index: provocation.provocation_index as number,
+          analysis_id: validation.analysis_id as string,
+          provocation_index: validation.provocation_index as number,
         },
       })) as ExplainResponse | ApiError
 
       if (isApiErrorLike(result)) {
+        // v14+ analyses: backend's /api/explain-provocation returns 404
+        // because it still reads the legacy `provocations` column. The
+        // problem field on the validation already does most of what
+        // explain was for, so 404 is treated as "no extra detail" — we
+        // surface that as the cached explanation instead of an error.
+        if (result.kind === 'SERVER_ERROR' && (result as { status?: number }).status === 404) {
+          cachedExplanation =
+            'No extra detail available for this validation. The card text above is the full ' +
+            'description of what to push back on.'
+          setState('explained')
+          return
+        }
         console.warn('[Crith V2] explain failed:', result)
         setState('error')
         return
@@ -274,6 +339,56 @@ export function attach(
     } catch (err) {
       console.warn('[Crith V2] explain sendMessage threw:', err)
       setState('error')
+    }
+  }
+
+  // ── Ask AI handler ──────────────────────────────────────────
+
+  async function handleAskAi(): Promise<void> {
+    if (askAiFired) return
+    if (!askAiAvailable) {
+      console.warn(
+        '[Crith V2] ask_ai unavailable',
+        { followUpPromptLen: followUpPrompt.length, platform: cardAdapter?.name },
+      )
+      return
+    }
+
+    askAiFired = true
+    applyAskAiState()
+
+    // Engagement event — fire-and-forget. Backend (v14+) accepts
+    // 'asked_ai'; older deploys 400 the request, which the SW logs and
+    // moves on. Either way the user-visible flow continues.
+    if (hasIds) {
+      void chrome.runtime
+        .sendMessage({
+          type: 'LOG_EVENT',
+          payload: {
+            analysis_id: validation.analysis_id as string,
+            provocation_index: validation.provocation_index as number,
+            event_type: 'asked_ai',
+          },
+        })
+        .catch(() => { /* fire-and-forget */ })
+    }
+
+    console.log(
+      '[Crith V2] ask AI:',
+      JSON.stringify({
+        prov_id: validation.provocation_id,
+        prompt_chars: followUpPrompt.length,
+      }),
+    )
+
+    // Close the card before triggering — feels snappier and matches the
+    // user's mental model that they've now "sent" the question.
+    card.classList.remove('open')
+    logo.classList.add('handled')
+
+    const ok = await cardAdapter!.sendToInput(followUpPrompt)
+    if (!ok) {
+      console.warn('[Crith V2] ask_ai: sendToInput returned false — input/send-button selector likely drifted')
     }
   }
 
@@ -297,10 +412,15 @@ export function attach(
         return
       }
 
+      if (action === 'ask_ai') {
+        void handleAskAi()
+        return
+      }
+
       // Useful / Not useful — rating actions. Once chosen the rating is
       // locked (both buttons disabled, chosen button gets a check
       // glyph) but the card itself stays accessible: hovering the logo
-      // reopens it so the user can re-read the provocation at any time.
+      // reopens it so the user can re-read the validation at any time.
       if (action !== 'useful' && action !== 'not_useful') return
       if (ratingChosen != null) return
 
@@ -315,8 +435,8 @@ export function attach(
           .sendMessage({
             type: 'LOG_EVENT',
             payload: {
-              analysis_id: provocation.analysis_id as string,
-              provocation_index: provocation.provocation_index as number,
+              analysis_id: validation.analysis_id as string,
+              provocation_index: validation.provocation_index as number,
               event_type: action,
             },
           })
@@ -324,9 +444,9 @@ export function attach(
       }
 
       if (action === 'useful') {
-        console.log('[Crith V2] marked useful:', provocation.provocation_id)
+        console.log('[Crith V2] marked useful:', validation.provocation_id)
       } else {
-        console.log('[Crith V2] marked not useful:', provocation.provocation_id)
+        console.log('[Crith V2] marked not useful:', validation.provocation_id)
       }
     })
   })

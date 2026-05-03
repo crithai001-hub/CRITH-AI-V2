@@ -4,6 +4,7 @@
 // silently disable the feature. Last verified: 2026-04-30.
 
 import { collectPriorTurns } from '../shared/dom-helpers'
+import { setInputAndSend } from '../shared/send-input'
 import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
 const SEL = {
@@ -133,6 +134,49 @@ function getPriorTurns(currentResponseNode: Element): ConversationTurn[] {
   )
 }
 
+/**
+ * True while ChatGPT is generating into `messageNode`. Multiple signals
+ * checked in order of specificity:
+ *   1. Per-message `.result-streaming` class (legacy + most specific)
+ *   2. Per-message `[data-streaming="true"]` attribute (newer pattern)
+ *   3. Global stop-button presence — proxy for "some message on the
+ *      page is streaming". Loose, but combined with the observer's
+ *      per-node text-growth check, good enough to catch ChatGPT's
+ *      current DOM.
+ */
+function isStreaming(messageNode: Element): boolean {
+  if (messageNode.matches('.result-streaming')) return true
+  if (messageNode.querySelector('.result-streaming')) return true
+  if (messageNode.matches('[data-streaming="true"]')) return true
+  if (messageNode.querySelector('[data-streaming="true"]')) return true
+
+  // Global stop-button. Present from streaming-start through
+  // streaming-end; flips back to "send" button afterward. Multiple
+  // selector forms cover ChatGPT's UI variants.
+  const stopButton = document.querySelector(
+    '[data-testid="stop-button"], button[aria-label*="Stop generating" i], button[aria-label*="Stop streaming" i]',
+  )
+  return !!stopButton
+}
+
+const INPUT_SELECTORS = [
+  '#prompt-textarea',
+  'textarea[data-id="root"]',
+  'textarea[placeholder*="Message" i]',
+  'div[contenteditable="true"]#prompt-textarea',
+  'div[contenteditable="true"][role="textbox"]',
+] as const
+
+const SEND_BUTTON_SELECTORS = [
+  '[data-testid="send-button"]',
+  'button[aria-label*="Send message" i]',
+  'button[aria-label*="Send prompt" i]',
+] as const
+
+async function sendToInput(prompt: string): Promise<boolean> {
+  return setInputAndSend(INPUT_SELECTORS, SEND_BUTTON_SELECTORS, prompt)
+}
+
 export const adapter: PlatformAdapter = {
   name: 'chatgpt',
   getChatContainer,
@@ -142,4 +186,6 @@ export const adapter: PlatformAdapter = {
   getSessionId,
   getAllResponseNodes,
   getPriorTurns,
+  isStreaming,
+  sendToInput,
 }
