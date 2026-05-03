@@ -125,8 +125,10 @@ function handleAddedNode(node: Element): void {
   if (!adapter) return
   if (adapter.isResponseNode(node)) {
     log(
-      'response node detected — tag:', node.tagName,
-      '| classes:', node.className?.slice?.(0, 80),
+      'response node detected (direct) — tag:', node.tagName,
+      '| classes:', node.className?.slice?.(0, 100),
+      '| role:', node.getAttribute('data-message-author-role'),
+      '| author:', node.getAttribute('data-author'),
     )
     attachToResponse(node)
   } else {
@@ -134,6 +136,12 @@ function handleAddedNode(node: Element): void {
     if (inner) {
       for (const d of inner) {
         if (adapter.isResponseNode(d)) {
+          log(
+            'response node detected (descendant) — tag:', d.tagName,
+            '| classes:', d.className?.slice?.(0, 100),
+            '| role:', d.getAttribute('data-message-author-role'),
+            '| author:', d.getAttribute('data-author'),
+          )
           attachToResponse(d)
           break
         }

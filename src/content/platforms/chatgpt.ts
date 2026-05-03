@@ -13,10 +13,14 @@ const SEL = {
     'main',
     '#__next main',
   ],
+  // Canonical selector only. The previous fallbacks (testid +
+  // [class*="agent-turn"]) were causing false positives — matching
+  // user-message wrappers that happened to share class fragments,
+  // which tied the per-node poller to text that never streams. The
+  // data-message-author-role attribute has been stable on ChatGPT
+  // for years and is the single most reliable signal.
   responseNode: [
     '[data-message-author-role="assistant"]',
-    'div[data-testid^="conversation-turn-"][data-author="assistant"]',
-    'div[class*="agent-turn"]',
   ],
   promptNodeForResponse: [
     // Current ChatGPT (~2026): user message text lives inside this testid
