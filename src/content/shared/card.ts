@@ -235,7 +235,8 @@ export function attach(
 
   // ── Hover/tap → open/close ──────────────────────────────────
 
-  const open = (): void => {
+  const open = (source: string): void => {
+    console.log('[Crith V2 CARD] open() called by', source)
     if (collapseTimer != null) {
       clearTimeout(collapseTimer)
       collapseTimer = null
@@ -258,15 +259,63 @@ export function attach(
 
   const triggers: HTMLElement[] = [logo, ...extraTriggers]
   for (const t of triggers) {
-    t.addEventListener('mouseenter', open)
+    t.addEventListener('mouseenter', () => open('mouseenter'))
     t.addEventListener('touchstart', (e: Event) => {
-      open()
+      open('touchstart')
       e.stopPropagation()
     }, { passive: true })
     t.addEventListener('mouseleave', closeSoon)
   }
   card.addEventListener('mouseenter', cancelClose)
   card.addEventListener('mouseleave', closeSoon)
+
+  // ── Defensive fallback: document-level event delegation ─────
+  //
+  // Per-element listeners above are the primary path, but they break
+  // when ChatGPT's React re-renders the assistant message and replaces
+  // our underline span DOM. The capturing document-level handler
+  // catches mouseover events that bubble up from any descendant of
+  // the host (covers the logo) OR any element whose textContent
+  // matches one of our underline targets (covers re-rendered spans
+  // even with new identity). Cheap and idempotent — calling
+  // open('delegated') when the card is already open is a no-op.
+  const handleDocMouseOver = (e: MouseEvent): void => {
+    const target = e.target as Element | null
+    if (!target) return
+    // Hover within the host itself (logo, card, etc.)?
+    if (target === host || host.contains(target)) {
+      open('host-delegated')
+      return
+    }
+    // Hover on one of the underline spans we created (or React's
+    // replacement that has the same data attribute + text)?
+    if (target instanceof HTMLElement && target.matches('span.crith-prov-underline[data-crith-prov="underline"]')) {
+      // Match by anchored_to text — we can't trust span identity across
+      // re-renders, but ChatGPT can't replace the text content without
+      // breaking the visible underline.
+      if (target.textContent && extraTriggers.some((t) => t.textContent === target.textContent)) {
+        open('span-delegated')
+      }
+    }
+  }
+  const handleDocMouseOut = (e: MouseEvent): void => {
+    const target = e.target as Element | null
+    const related = e.relatedTarget as Element | null
+    if (!target) return
+    // Leaving the host or an underline span, AND not entering another
+    // related trigger? Schedule a close.
+    if (target === host || host.contains(target) ||
+        (target instanceof HTMLElement && target.matches('span.crith-prov-underline'))) {
+      // Don't close if we're moving into another relevant element
+      if (related && (related === host || host.contains(related) ||
+          (related instanceof HTMLElement && related.matches('span.crith-prov-underline')))) {
+        return
+      }
+      closeSoon()
+    }
+  }
+  document.addEventListener('mouseover', handleDocMouseOver, true)
+  document.addEventListener('mouseout', handleDocMouseOut, true)
 
   // ── Explain handler ─────────────────────────────────────────
 
