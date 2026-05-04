@@ -334,6 +334,24 @@ export function show(responseNode: Element, validations: Validation[]): void {
     positionHost(host, firstSpan, responseNode)
     attachReposition(host, firstSpan, responseNode)
 
+    // Diagnostic: confirm host was actually rendered visibly. If
+    // span.getBoundingClientRect returns 0,0,0,0 the underline is
+    // detached from layout (e.g., site script re-rendered the
+    // message). If host.getBoundingClientRect returns 0,0,0,0 the
+    // host is in DOM but invisible (display:none, transform off-screen,
+    // or unknown-element CSS reset). Log both so we can see which.
+    const spanRect = firstSpan.getBoundingClientRect()
+    const hostRect = host.getBoundingClientRect()
+    log(
+      `host placed | host_xy=(${Math.round(hostRect.left)},${Math.round(hostRect.top)}) ` +
+        `host_size=${Math.round(hostRect.width)}x${Math.round(hostRect.height)} | ` +
+        `span_xy=(${Math.round(spanRect.left)},${Math.round(spanRect.top)}) ` +
+        `span_size=${Math.round(spanRect.width)}x${Math.round(spanRect.height)} | ` +
+        `host_in_body=${document.body.contains(host)} | ` +
+        `host_display=${getComputedStyle(host).display} ` +
+        `host_visibility=${getComputedStyle(host).visibility}`,
+    )
+
     requestAnimationFrame(() => {
       try {
         const logo = host.shadowRootClosed?.querySelector?.('.crith-prov-logo')
