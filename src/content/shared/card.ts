@@ -63,13 +63,10 @@ export function attach(
   const logo = _logo
   const card = _card
 
+  // Required for every card. If any of these is missing the markup is
+  // broken upstream in renderer.ts — bail rather than render a partial
+  // card.
   const _text = card.querySelector('.text') as HTMLParagraphElement | null
-  const _loader = card.querySelector('.loader') as HTMLParagraphElement | null
-  const _errorMsg = card.querySelector('.error-msg') as HTMLParagraphElement | null
-  const _backLink = card.querySelector('.back-link') as HTMLAnchorElement | null
-  const _explainBtn = card.querySelector(
-    'button[data-action="explain"]',
-  ) as HTMLButtonElement | null
   const _notUsefulBtn = card.querySelector(
     'button[data-action="not_useful"]',
   ) as HTMLButtonElement | null
@@ -80,24 +77,29 @@ export function attach(
     'button[data-action="ask_ai"]',
   ) as HTMLButtonElement | null
 
-  if (
-    !_text || !_loader || !_errorMsg || !_backLink ||
-    !_explainBtn || !_notUsefulBtn || !_usefulBtn || !_askAiBtn
-  ) {
+  if (!_text || !_notUsefulBtn || !_usefulBtn || !_askAiBtn) {
     return
   }
+
+  // Optional — left over from the now-removed Explain feature. The
+  // renderer still creates these elements (back-link, loader,
+  // error-msg) but no code path activates them. Kept as nullable
+  // refs so future re-introduction of an Explain affordance doesn't
+  // require re-querying.
+  const _backLink = card.querySelector('.back-link') as HTMLAnchorElement | null
+  const _loader = card.querySelector('.loader') as HTMLParagraphElement | null
+  const _errorMsg = card.querySelector('.error-msg') as HTMLParagraphElement | null
 
   // Re-bind to fresh consts so the closures defined below capture the
   // narrowed (non-null) types. TS doesn't preserve narrowing across
   // closures via the original variables alone.
   const text = _text
-  const loader = _loader
-  const errorMsg = _errorMsg
-  const backLink = _backLink
-  const explainBtn = _explainBtn
   const notUsefulBtn = _notUsefulBtn
   const usefulBtn = _usefulBtn
   const askAiBtn = _askAiBtn
+  const loader = _loader
+  const errorMsg = _errorMsg
+  const backLink = _backLink
 
   const problemText = (validation.problem || '').slice(0, 320)
   const followUpPrompt = validation.follow_up_prompt || ''
@@ -165,15 +167,16 @@ export function attach(
       errorTimer = null
     }
 
+    // The 'loading' / 'explained' / 'error' states only fire from the
+    // Explain flow which is no longer wired (button removed). They're
+    // kept here for re-introduction; in practice only 'default' runs.
     switch (state) {
       case 'default': {
         text.textContent = problemText
         text.hidden = false
-        loader.hidden = true
-        errorMsg.hidden = true
-        backLink.hidden = true
-        explainBtn.hidden = false
-        explainBtn.disabled = !hasIds
+        if (loader) loader.hidden = true
+        if (errorMsg) errorMsg.hidden = true
+        if (backLink) backLink.hidden = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -181,13 +184,10 @@ export function attach(
         break
       }
       case 'loading': {
-        // Hide question; show "Thinking…". Not useful / Useful / Ask AI
-        // remain clickable so the user can bail out / rate at any time.
         text.hidden = true
-        loader.hidden = false
-        errorMsg.hidden = true
-        backLink.hidden = true
-        explainBtn.disabled = true
+        if (loader) loader.hidden = false
+        if (errorMsg) errorMsg.hidden = true
+        if (backLink) backLink.hidden = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -197,11 +197,9 @@ export function attach(
       case 'explained': {
         text.textContent = cachedExplanation ?? ''
         text.hidden = false
-        loader.hidden = true
-        errorMsg.hidden = true
-        backLink.hidden = false
-        explainBtn.hidden = true
-        explainBtn.disabled = true
+        if (loader) loader.hidden = true
+        if (errorMsg) errorMsg.hidden = true
+        if (backLink) backLink.hidden = false
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -209,16 +207,11 @@ export function attach(
         break
       }
       case 'error': {
-        // Functionally the same UI as 'default' plus a transient
-        // error line. Auto-revert after ERROR_DISPLAY_MS so the line
-        // doesn't persist if the user tries again immediately.
         text.textContent = problemText
         text.hidden = false
-        loader.hidden = true
-        errorMsg.hidden = false
-        backLink.hidden = true
-        explainBtn.hidden = false
-        explainBtn.disabled = !hasIds
+        if (loader) loader.hidden = true
+        if (errorMsg) errorMsg.hidden = false
+        if (backLink) backLink.hidden = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -442,12 +435,17 @@ export function attach(
   }
 
   // ── Back-to-question handler ────────────────────────────────
+  // Only wires up if the back-link element exists (it does, the
+  // renderer still creates it) but tolerates a future markup change
+  // that might drop it.
 
-  backLink.addEventListener('click', (e: Event) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setState('default')
-  })
+  if (backLink) {
+    backLink.addEventListener('click', (e: Event) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setState('default')
+    })
+  }
 
   // ── Button click handlers ───────────────────────────────────
 
