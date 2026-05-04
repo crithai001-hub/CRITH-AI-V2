@@ -354,7 +354,7 @@ export function show(responseNode: Element, validations: Validation[]): void {
 
     requestAnimationFrame(() => {
       try {
-        const logo = host.shadowRootClosed?.querySelector?.('.crith-prov-logo')
+        const logo = host.shadowRoot?.querySelector?.('.crith-prov-logo')
         if (logo) logo.classList.add('pulse')
       } catch { /* noop */ }
     })
@@ -427,10 +427,14 @@ function wrapUnderline(responseNode: Element, target: string, lens: Lens): HTMLS
   return spans
 }
 
-// Closed shadow roots aren't readable via host.shadowRoot. We stash the
-// root on the host element with a non-standard property so the rAF pulse
-// step can find the logo. Type augmentation on HTMLElement is local.
-type HostWithShadow = HTMLElement & { shadowRootClosed?: ShadowRoot }
+// Open shadow root — accessible via the standard host.shadowRoot
+// property. We previously used closed mode + a non-standard
+// shadowRootClosed property, but that was failing in production for
+// reasons not yet fully understood (possibly site scripts or browser
+// extensions stripping non-standard JS props). Open mode trades a
+// thin layer of "site scripts can see our shadow" isolation for
+// reliable, debuggable access from DevTools and the rAF pulse step.
+type HostWithShadow = HTMLElement
 
 function createHost(
   provocationId: string,
@@ -444,8 +448,7 @@ function createHost(
   // absolutely-positioned host anchored to body would stay at a fixed
   // PAGE coordinate and become off-screen the moment the chat scrolls.
   host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483647; pointer-events: none;'
-  const root = host.attachShadow({ mode: 'closed' })
-  host.shadowRootClosed = root
+  const root = host.attachShadow({ mode: 'open' })
 
   const style = document.createElement('style')
   style.textContent = SHADOW_STYLES
