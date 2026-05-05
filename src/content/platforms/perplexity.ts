@@ -35,6 +35,16 @@ const SEL = {
     '[data-testid*="user"]',
     '[data-testid*="message-block-query"]',
     '[class*="QueryText"]',
+    // Perplexity 2026 typically renders the query as a heading
+    // above the answer block. h1 is the most stable hit; the
+    // font-display / text-3xl / text-2xl tailwind classes are
+    // their query-styling fingerprint and survive renames.
+    'main h1',
+    '[role="heading"][aria-level="1"]',
+    'div[class*="font-display"]',
+    'div[class*="text-3xl"]',
+    'div[class*="text-2xl"]',
+    '[class*="QueryHeader"]',
   ],
 } as const
 
@@ -198,6 +208,32 @@ if (DEBUG_DIAGNOSTIC && typeof location !== 'undefined' && location.hostname.inc
           textLen: (el.textContent ?? '').length,
         }))
       dump['answer-shaped div samples'] = sample
+
+      // User-query candidates — short text blocks at the top of
+      // the thread, often h1 or a styled heading div. We need this
+      // because getPromptForResponse failing returns null which
+      // drops the analyze fire entirely.
+      const queryCandidates = [
+        ...Array.from(document.querySelectorAll('main h1')),
+        ...Array.from(document.querySelectorAll('main [role="heading"]')),
+        ...Array.from(
+          document.querySelectorAll('main [class*="query" i], main [data-testid*="query" i]'),
+        ),
+        ...Array.from(
+          document.querySelectorAll('main [class*="font-display"], main [class*="text-3xl"], main [class*="text-2xl"]'),
+        ),
+      ]
+        .filter((el, i, arr) => arr.indexOf(el) === i)
+        .slice(0, 8)
+        .map((el) => ({
+          tag: el.tagName,
+          classes: (el.className || '').toString().slice(0, 200),
+          dataTestid: el.getAttribute('data-testid'),
+          ariaLevel: el.getAttribute('aria-level'),
+          text: (el.textContent ?? '').trim().slice(0, 80),
+        }))
+      dump['query-shaped candidates'] = queryCandidates
+
       console.log('[Crith V2 PROV][perplexity diag]', dump)
     } catch (err) {
       console.warn('[Crith V2 PROV][perplexity diag] dump failed', err)
