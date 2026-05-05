@@ -20,6 +20,11 @@ import { setCardAdapter } from './card'
 import { getClaimVerdict, setClaimCardAdapter, setClaimVerdict } from './claim-card'
 import { classifyVerifyResult, filterClaimsForVerify } from './claim-filter'
 import { showQuotaBanner } from './quota-banner'
+import {
+  recordResponseAnalyzed,
+  recordVerdict,
+  resetChatStatus,
+} from './chat-status-pill'
 import { adapter as chatgptAdapter } from '../platforms/chatgpt'
 import { adapter as claudeAdapter } from '../platforms/claude'
 import { adapter as geminiAdapter } from '../platforms/gemini'
@@ -295,20 +300,31 @@ async function handleResponseComplete(params: {
 
   // Verifiable claims: gate by hallucination_signal, then auto-fire
   // VERIFY_CLAIM in parallel. Only `contradicted` verdicts produce UI.
+  let candidates: VerifiableClaim[] = []
   if (enrichedClaims.length > 0) {
     const signalCounts: Record<string, number> = {}
     for (const c of enrichedClaims) {
       const s = c.hallucination_signal ?? 'none'
       signalCounts[s] = (signalCounts[s] ?? 0) + 1
     }
-    const candidates = filterClaimsForVerify(enrichedClaims)
+    candidates = filterClaimsForVerify(enrichedClaims)
     log(
       `claims=${enrichedClaims.length} signal=${JSON.stringify(signalCounts)} ` +
         `candidates_to_verify=${candidates.length}`,
     )
-    if (candidates.length > 0) {
-      void verifyAndRenderContradicted(node, candidates)
-    }
+  }
+
+  // Update the chat-level status pill with this response's totals
+  // BEFORE firing verify — the pill should reflect "we found N
+  // claims, sent K to verify" even before any verdicts come back.
+  recordResponseAnalyzed({
+    validationCount: enriched.length,
+    claimCount: enrichedClaims.length,
+    signalEligibleCount: candidates.length,
+  })
+
+  if (candidates.length > 0) {
+    void verifyAndRenderContradicted(node, candidates)
   }
 }
 
@@ -360,6 +376,7 @@ async function verifyAndRenderContradicted(
         log(
           `VERIFY_CLAIM cache-hit claim_index=${idx} verdict=${cached.verdict}`,
         )
+        recordVerdict(cached.verdict)
         if (cached.verdict === 'contradicted' && document.body.contains(responseNode)) {
           rendererShow(responseNode, [], [claim])
         }
@@ -389,6 +406,18 @@ async function verifyAndRenderContradicted(
         showQuotaBanner(QUOTA_BANNER_TEXT)
         log(`VERIFY_CLAIM QUOTA_EXCEEDED — halting session verifies`)
         return
+      }
+
+      // Update the chat-status pill with whatever verdict came back,
+      // not just contradicted ones — the pill rolls up confirmed and
+      // inconclusive too. ApiError shapes lack a `verdict` field so
+      // they're naturally skipped here.
+      if (
+        raw !== null &&
+        typeof raw === 'object' &&
+        typeof (raw as { verdict?: unknown }).verdict === 'string'
+      ) {
+        recordVerdict((raw as { verdict: string }).verdict)
       }
 
       const outcome = classifyVerifyResult(raw)
@@ -449,6 +478,7 @@ if (adapter) {
     log(`url changed: ${oldUrl} → ${newUrl} — tearing down + restarting`)
     observer.tearDownUI()
     observer.stop()
+    resetChatStatus()
     observer.start(adapter, handleResponseComplete)
   })
 } else {
