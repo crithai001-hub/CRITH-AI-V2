@@ -17,7 +17,9 @@
 import * as observer from './observer'
 import { show as rendererShow } from './renderer'
 import { setCardAdapter } from './card'
-import { setClaimCardAdapter, setClaimVerdict } from './claim-card'
+import { getClaimVerdict, setClaimCardAdapter, setClaimVerdict } from './claim-card'
+import { classifyVerifyResult, filterClaimsForVerify } from './claim-filter'
+import { showQuotaBanner } from './quota-banner'
 import { adapter as chatgptAdapter } from '../platforms/chatgpt'
 import { adapter as claudeAdapter } from '../platforms/claude'
 import { adapter as geminiAdapter } from '../platforms/gemini'
@@ -35,7 +37,6 @@ import type {
   Provocation,
   Validation,
   VerifiableClaim,
-  VerifyClaimResponse,
 } from '../../shared/types'
 
 const DEBUG = true
@@ -292,34 +293,49 @@ async function handleResponseComplete(params: {
   // analyze and don't depend on any further round-trip.
   rendererShow(node, enriched)
 
-  // Verifiable claims: kick off VERIFY_CLAIM in parallel for each
-  // detected claim. The underline is a "this part has been disproven"
-  // signal, not a "you might want to check this" signal — so we only
-  // render the host once we know the verdict is "contradicted". Other
-  // verdicts (confirmed / inconclusive / error) leave no visible trace.
+  // Verifiable claims: gate by hallucination_signal, then auto-fire
+  // VERIFY_CLAIM in parallel. Only `contradicted` verdicts produce UI.
   if (enrichedClaims.length > 0) {
-    const riskCounts: Record<string, number> = {}
+    const signalCounts: Record<string, number> = {}
     for (const c of enrichedClaims) {
-      riskCounts[c.risk] = (riskCounts[c.risk] ?? 0) + 1
+      const s = c.hallucination_signal ?? 'none'
+      signalCounts[s] = (signalCounts[s] ?? 0) + 1
     }
+    const candidates = filterClaimsForVerify(enrichedClaims)
     log(
-      `claims=${enrichedClaims.length} risk=${JSON.stringify(riskCounts)} — ` +
-        'auto-firing VERIFY_CLAIM for each',
+      `claims=${enrichedClaims.length} signal=${JSON.stringify(signalCounts)} ` +
+        `candidates_to_verify=${candidates.length}`,
     )
-    void verifyAndRenderContradicted(node, enrichedClaims)
+    if (candidates.length > 0) {
+      void verifyAndRenderContradicted(node, candidates)
+    }
   }
 }
 
 /**
- * Fire VERIFY_CLAIM in parallel for every claim detected on this
- * response. As each verdict resolves, render the underline + host
- * iff the verdict is "contradicted" — pre-populating the claim-card
- * verdict cache so the card opens directly in the verified state on
- * first hover.
+ * Once any verify call returns 429, halt all further verify fires
+ * for the rest of the content-script lifetime. The session flag
+ * survives URL changes within a tab; a full page reload resets it
+ * (the content script reboots from scratch).
+ */
+let verifyQuotaHalted = false
+
+const QUOTA_BANNER_TEXT =
+  'Out of verifications this month — claim checking paused.'
+
+/**
+ * Fire VERIFY_CLAIM in parallel for the supplied (already-filtered)
+ * candidates. Renders the underline + claim host iff the verdict is
+ * `contradicted` — confirmed / inconclusive / error / network errors
+ * all produce no UI.
  *
- * Errors and non-contradicted verdicts produce no visible UI. The
- * VERIFY_CLAIM message route in the SW already logs failures, so
- * we silently consume them here.
+ * Cache short-circuit: any candidate whose verdict is already in
+ * claim-card's verdictCache (e.g. from a prior visit to this same
+ * conversation) renders immediately without firing the network call.
+ *
+ * Quota: a 429 from any verify call sets the session-wide halt flag
+ * AND surfaces the one-time banner. In-flight calls already past the
+ * fetch boundary still resolve normally — only NEW fires are skipped.
  */
 async function verifyAndRenderContradicted(
   responseNode: Element,
@@ -333,40 +349,62 @@ async function verifyAndRenderContradicted(
         log('claim missing analysis_id or claim_index — skipping verify', claim)
         return
       }
-      let verdict: VerifyClaimResponse | ApiError
+
+      // Cache short-circuit. If we already have a verdict from this
+      // session (SPA nav back to the same chat), reuse it and render
+      // directly if it was contradicted. setClaimVerdict is a no-op
+      // on cache identity here, but keep the call to be explicit
+      // about render-time invariants.
+      const cached = getClaimVerdict(aid, idx)
+      if (cached) {
+        log(
+          `VERIFY_CLAIM cache-hit claim_index=${idx} verdict=${cached.verdict}`,
+        )
+        if (cached.verdict === 'contradicted' && document.body.contains(responseNode)) {
+          rendererShow(responseNode, [], [claim])
+        }
+        return
+      }
+
+      if (verifyQuotaHalted) {
+        log(`VERIFY_CLAIM skipped (session quota halted) claim_index=${idx}`)
+        return
+      }
+
+      let raw: unknown
       try {
-        verdict = (await chrome.runtime.sendMessage({
+        raw = await chrome.runtime.sendMessage({
           type: 'VERIFY_CLAIM',
           payload: { analysis_id: aid, claim_index: idx },
-        })) as VerifyClaimResponse | ApiError
+        })
       } catch (err) {
-        log(`VERIFY_CLAIM sendMessage failed for claim_index=${idx}:`, err)
+        log(`VERIFY_CLAIM sendMessage failed claim_index=${idx}:`, err)
         return
       }
-      if (isApiError(verdict)) {
-        log(`VERIFY_CLAIM error claim_index=${idx} kind=${verdict.kind}`)
+
+      // Catch QUOTA_EXCEEDED before the generic classifier so we can
+      // both halt + banner. Other ApiErrors fall through to noRender.
+      if (isApiError(raw) && raw.kind === 'QUOTA_EXCEEDED') {
+        verifyQuotaHalted = true
+        showQuotaBanner(QUOTA_BANNER_TEXT)
+        log(`VERIFY_CLAIM QUOTA_EXCEEDED — halting session verifies`)
         return
       }
-      if (
-        !verdict ||
-        typeof verdict.verdict !== 'string' ||
-        !Array.isArray(verdict.source_urls)
-      ) {
-        log(`VERIFY_CLAIM unexpected shape claim_index=${idx}`, verdict)
+
+      const outcome = classifyVerifyResult(raw)
+      if (outcome.kind === 'noRender') {
+        log(`VERIFY_CLAIM no-render claim_index=${idx} reason=${outcome.reason}`)
         return
       }
+
+      const verdict = outcome.verdict
       log(
-        `VERIFY_CLAIM resolved claim_index=${idx} verdict=${verdict.verdict} ` +
+        `VERIFY_CLAIM contradicted claim_index=${idx} ` +
           `sources=${verdict.source_urls.length}`,
       )
-      if (verdict.verdict !== 'contradicted') return
-
-      // Pre-stuff the verdict so the claim card opens in the verified
-      // state without firing a second VERIFY_CLAIM. Then render the
-      // underline + host for this single claim.
       setClaimVerdict(aid, idx, verdict)
       if (!document.body.contains(responseNode)) {
-        log(`response node detached before verdict — skipping render claim_index=${idx}`)
+        log(`response node detached — skipping render claim_index=${idx}`)
         return
       }
       rendererShow(responseNode, [], [claim])

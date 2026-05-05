@@ -952,29 +952,15 @@ function createClaimHost(
 
   card.appendChild(verifyResult)
 
-  // Loading indicator while VERIFY_CLAIM is in flight.
-  const loader = document.createElement('p')
-  loader.className = 'loader'
-  loader.textContent = 'Verifying…'
-  loader.hidden = true
-  card.appendChild(loader)
-
-  // Transient error message — populated by claim-card.ts based on
-  // the ApiError kind, shown for 3s after a failed verify call.
-  const errorMsg = document.createElement('p')
-  errorMsg.className = 'error-msg'
-  errorMsg.textContent = "Couldn't verify — try later."
-  errorMsg.hidden = true
-  card.appendChild(errorMsg)
-
-  // Single-row button cluster: ratings on the left, Verify primary
-  // (amber) on the right via margin-left:auto.
+  // Single-row button cluster — only feedback ratings now. The
+  // manual Verify button was removed when the orchestrator started
+  // auto-verifying every high/medium-signal claim before render;
+  // by the time this host attaches, the verdict is already cached.
   const controls = document.createElement('div')
   controls.className = 'controls'
   const buttons: Array<{ cls: string; action: string; label: string }> = [
     { cls: 'btn-secondary', action: 'useful',     label: 'Useful' },
     { cls: 'btn-secondary', action: 'not_useful', label: 'Not useful' },
-    { cls: 'btn-primary',   action: 'verify',     label: 'Verify ↻' },
   ]
   for (const b of buttons) {
     const btn = document.createElement('button')

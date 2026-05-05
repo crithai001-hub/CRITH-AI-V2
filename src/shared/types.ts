@@ -162,6 +162,17 @@ export type Risk = 'high' | 'medium' | 'low'
 
 export type Verdict = 'confirmed' | 'contradicted' | 'inconclusive' | 'error'
 
+/**
+ * Backend's read on whether the claim looks fabricated or stale,
+ * separate from `risk` (consequence severity). Drives the verify-fire
+ * gate in the orchestrator: only `high` and `medium` go to Brave +
+ * Claude verification — `none` claims are extracted but skipped.
+ *
+ * Optional in the type system because old backend deploys don't ship
+ * the field; the orchestrator treats absent values as `none` (=skip).
+ */
+export type HallucinationSignal = 'high' | 'medium' | 'none'
+
 export type VerifiableClaim = {
   /** Searchable, display-ready form of the claim. */
   claim: string
@@ -171,6 +182,15 @@ export type VerifiableClaim = {
   /** One sentence — shown in the card body. */
   why_verify: string
   risk: Risk
+  /**
+   * Plausibility signal from the claim extractor. Verify fires only
+   * for `high` and `medium`. Optional during the rollout where older
+   * backend deploys don't include it — the orchestrator coerces
+   * absent values to `none`.
+   */
+  hallucination_signal?: HallucinationSignal
+  /** ≤80 char rationale for the signal. Currently unused in UI; kept for telemetry. */
+  hallucination_reason?: string
   /** Stamped by the orchestrator from AnalyzeResponseSuccess.analysis_id. */
   analysis_id?: string
   /** Index within verifiable_claims[]. Stamped by orchestrator. */
