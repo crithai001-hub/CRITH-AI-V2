@@ -14,11 +14,25 @@ import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 // landed — paste the output if responses stop being detected.
 const SEL = {
   chatContainer: [
+    // Prefer specific scoped matches when <main> exists.
     'main [class*="ChatBody"]',
     'main [class*="chat-body"]',
     'main [class*="conversation"]',
     'main [class*="dialog"]',
     'main',
+    // DeepSeek 2026 doesn't ship a <main> wrapper — fall back to
+    // the chat body / dialog scrollers anywhere in the document.
+    '[class*="ChatBody"]',
+    '[class*="chat-body"]',
+    '[class*="conversation"]',
+    '[class*="dialog"][class*="content"]',
+    '[class*="ScrollWrapper"]',
+    '[class*="scroll-wrapper"]',
+    // Ultimate fallback so the observer always attaches. body
+    // observation is broader than needed but the MutationObserver
+    // only reacts to childList additions and isResponseNode does
+    // the real filtering, so the per-mutation cost stays small.
+    'body',
   ],
   responseNode: [
     // ds-markdown is DeepSeek's stable class for assistant-rendered
