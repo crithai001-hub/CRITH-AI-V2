@@ -24,22 +24,27 @@ const SEL = {
     '[class*="conversation-thread"]',
     'body',
   ],
+  // CRITICAL: every selector in this list MUST be assistant-only.
+  // If a user-message wrapper matches, the orchestrator will run
+  // analyze on the user's prompt as if it were an AI response,
+  // produce flag anchors against prompt text, and underline parts
+  // of what the user typed. That breaks the entire UX premise.
+  // When in doubt, prefer narrow + specific over broad + fallback.
   responseNode: [
     'div[data-test-render-count] div[class*="font-claude-message"]',
     'div[class*="font-claude-message"]',
     'div[class*="claude-message"]',
-    // Modern semantic / testid markup.
     'div[data-testid="claude-message"]',
     'div[data-testid*="assistant-message"]',
     'div[role="article"][data-test-render-count]',
     '[data-message-author-role="assistant"]',
-    // Bare data-test-render-count is on every message wrapper —
-    // matches both user and assistant. The promptNodeForResponse
-    // walker excludes self / earlier matches, so this is safe.
-    'div[data-test-render-count]',
-    // Pre-2025 Claude wrapped assistant content in this; some A/B
-    // states still ship it.
-    'div[data-is-streaming]',
+    // NOTE: bare div[data-test-render-count] was here as a fallback
+    // — REMOVED because data-test-render-count exists on the USER's
+    // bubble too, causing isResponseNode to match prompts. If the
+    // current claude bundle drops font-claude-message AND
+    // claude-message AND the testids/role, the diagnostic will
+    // print empty hit counts and we'll add a properly assistant-
+    // only anchor instead of resurrecting the bare attribute.
   ],
   promptNodeForResponse: [
     'div[data-testid="user-message"]',

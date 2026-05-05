@@ -164,6 +164,28 @@ async function handleResponseComplete(params: {
   const { node, prompt, response, sessionId, priorTurns } = params
   const platformName = adapter?.name ?? 'unknown'
 
+  // Defensive guard: if the captured "response" text is identical
+  // to the prompt (or fully contained in it / contains it), the
+  // adapter's isResponseNode probably matched a user message
+  // wrapper instead of the assistant's. Skipping here prevents
+  // analyze from running against the user's prompt text and
+  // underlining parts of what they typed.
+  if (
+    response.length > 0 &&
+    prompt.length > 0 &&
+    (
+      response === prompt ||
+      (response.length <= prompt.length && prompt.includes(response)) ||
+      (prompt.length <= response.length && response.includes(prompt))
+    )
+  ) {
+    log(
+      'SKIP — response text matches/contains prompt text. Platform adapter likely misidentified a user-message node as a response. ' +
+        `(prompt_len=${prompt.length} response_len=${response.length})`,
+    )
+    return
+  }
+
   // Synthetic message_id. Platforms expose per-message IDs differently
   // (data-message-id on ChatGPT, render-count on Claude, etc.); the
   // adapter contract doesn't surface it, so we derive a stable-ish key
