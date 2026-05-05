@@ -65,11 +65,24 @@ const SHADOW_STYLES = `
 
   .crith-prov-dot {
     position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 8px;
-    height: 8px;
+    top: -3px;
+    right: -3px;
+    width: 11px;
+    height: 11px;
     border-radius: 50%;
+    /* White ring lifts the dot off the platform-colored logo
+     * regardless of its background — green/orange/blue all read
+     * fine through the contrast. Shadow adds a small physical
+     * lift so the dot looks like a separate element pinned on
+     * top of the logo, not an artifact of the logo itself. */
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  }
+  @media (prefers-color-scheme: dark) {
+    .crith-prov-dot {
+      border-color: #1f1f23;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    }
   }
 
   @keyframes prov-pulse {
