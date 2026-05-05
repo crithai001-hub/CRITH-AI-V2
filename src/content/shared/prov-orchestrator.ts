@@ -78,6 +78,18 @@ const PLATFORM_COLORS: Record<string, string> = {
   deepseek:   '#4D6BFE',
 }
 
+/**
+ * Color for the brand-mark SVG strokes inside the floating logo.
+ * Defaults to white (set in renderer SHADOW_STYLES via the
+ * --crith-prov-mark-color custom property fallback). Override here
+ * for any platform whose accent color makes white invisible —
+ * Grok's #E5E5E5 logo background washes out a white mark, so the
+ * mark flips to black.
+ */
+const PLATFORM_MARK_COLORS: Record<string, string> = {
+  grok: '#000',
+}
+
 function detectAdapter(): PlatformAdapter | null {
   const host = location.hostname
   if (host.includes('chatgpt.com') || host.includes('chat.openai.com')) return chatgptAdapter
@@ -672,7 +684,16 @@ if (adapter) {
   if (color) {
     document.documentElement.style.setProperty('--crith-prov-color', color)
   }
-  log(`booting on ${location.hostname} | adapter="${adapter.name}" | color=${color ?? '(default)'}`)
+  const markColor = PLATFORM_MARK_COLORS[adapter.name]
+  if (markColor) {
+    // Only set when overridden — leave the var unset on platforms
+    // that should use the SHADOW_STYLES default (#fff).
+    document.documentElement.style.setProperty('--crith-prov-mark-color', markColor)
+  }
+  log(
+    `booting on ${location.hostname} | adapter="${adapter.name}" | ` +
+      `color=${color ?? '(default)'} mark=${markColor ?? '(default white)'}`,
+  )
 
   // Hand the adapter to card.ts so its Ask AI button knows where to
   // route the follow-up prompt. Claim card uses the same adapter ref

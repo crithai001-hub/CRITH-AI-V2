@@ -70,7 +70,17 @@ const SHADOW_STYLES = `
   }
   .crith-prov-logo.pulse { animation: prov-pulse 1.6s ease-out 1; }
   .crith-prov-logo.handled { opacity: 0.55; }
-  .crith-prov-mark { display: block; width: 13px; height: 19.5px; }
+  .crith-prov-mark {
+    display: block;
+    width: 13px;
+    height: 19.5px;
+    /* CSS overrides the SVG's hardcoded stroke="#fff" presentation
+     * attribute (CSS wins). Default stays white so existing platforms
+     * (ChatGPT green, Claude orange, etc.) read the same as before;
+     * Grok's near-white logo bg sets --crith-prov-mark-color to
+     * #000 in prov-orchestrator.ts so the mark stays visible. */
+    stroke: var(--crith-prov-mark-color, #fff);
+  }
 
   .crith-prov-dot {
     position: absolute;
