@@ -21,6 +21,12 @@ import { getClaimVerdict, setClaimCardAdapter, setClaimVerdict } from './claim-c
 import { classifyVerifyResult, filterClaimsForVerify } from './claim-filter'
 import { showQuotaBanner } from './quota-banner'
 import {
+  getStoredAnalysis,
+  hashResponse,
+  saveAnalysis,
+  saveVerdict,
+} from './analysis-cache'
+import {
   mountChatStatusPill,
   recordResponseAnalyzed,
   recordVerdict,
@@ -43,6 +49,7 @@ import type {
   Provocation,
   Validation,
   VerifiableClaim,
+  VerifyClaimResponse,
 } from '../../shared/types'
 
 const DEBUG = true
@@ -324,8 +331,19 @@ async function handleResponseComplete(params: {
     signalEligibleCount: candidates.length,
   })
 
+  // Persist the analyze result so a refresh can rehydrate the same
+  // flags without re-burning analyze quota. Hash is over the full
+  // response text; conv id + hash uniquely identify the response.
+  const responseHash = hashResponse(response)
+  void saveAnalysis(sessionId, responseHash, {
+    analysis_id: result.analysis_id,
+    validations: enriched,
+    verifiable_claims: enrichedClaims,
+    verdicts: {},
+  })
+
   if (candidates.length > 0) {
-    void verifyAndRenderContradicted(node, candidates)
+    void verifyAndRenderContradicted(node, candidates, sessionId, responseHash)
   }
 }
 
@@ -357,6 +375,8 @@ const QUOTA_BANNER_TEXT =
 async function verifyAndRenderContradicted(
   responseNode: Element,
   claims: VerifiableClaim[],
+  conversationId: string,
+  responseHash: string,
 ): Promise<void> {
   await Promise.all(
     claims.map(async (claim) => {
@@ -378,6 +398,7 @@ async function verifyAndRenderContradicted(
           `VERIFY_CLAIM cache-hit claim_index=${idx} verdict=${cached.verdict}`,
         )
         recordVerdict(cached.verdict)
+        void saveVerdict(conversationId, responseHash, idx, cached)
         if (cached.verdict === 'contradicted' && document.body.contains(responseNode)) {
           rendererShow(responseNode, [], [claim])
         }
@@ -418,7 +439,14 @@ async function verifyAndRenderContradicted(
         typeof raw === 'object' &&
         typeof (raw as { verdict?: unknown }).verdict === 'string'
       ) {
-        recordVerdict((raw as { verdict: string }).verdict)
+        const v = raw as VerifyClaimResponse
+        recordVerdict(v.verdict)
+        // Persist non-contradicted verdicts too so refresh re-counts
+        // them on the pill without re-firing verify. The contradicted
+        // path saves again below (idempotent) for the render branch.
+        if (v.verdict !== 'contradicted' && Array.isArray(v.source_urls)) {
+          void saveVerdict(conversationId, responseHash, idx, v)
+        }
       }
 
       const outcome = classifyVerifyResult(raw)
@@ -433,6 +461,12 @@ async function verifyAndRenderContradicted(
           `sources=${verdict.source_urls.length}`,
       )
       setClaimVerdict(aid, idx, verdict)
+      // Persist the contradicted verdict so a refresh re-renders the
+      // underline + card without re-firing verify. Confirmed and
+      // inconclusive verdicts produce no UI but are also persisted
+      // (in the cached fast path below) so the chat-status pill
+      // counts them on rehydrate.
+      void saveVerdict(conversationId, responseHash, idx, verdict)
       if (!document.body.contains(responseNode)) {
         log(`response node detached — skipping render claim_index=${idx}`)
         return
@@ -440,6 +474,108 @@ async function verifyAndRenderContradicted(
       rendererShow(responseNode, [], [claim])
     }),
   )
+}
+
+// ── Rehydrate cached analyses on boot + after SPA nav ───────
+//
+// Walks every visible AI response node, hashes its text, and looks
+// up the cached analysis. If a hit is found, re-renders the
+// validations + (post-verdict) contradicted claim hosts WITHOUT
+// firing analyze or verify again — the user paid for the analysis
+// last visit, no need to re-burn the quota.
+//
+// Hash collision risk: djb2 over per-conversation namespace. With
+// realistic response counts per chat (<200), collision probability
+// is negligible.
+//
+// Backoff scan: SPA frameworks hydrate the chat over multiple
+// frames, so a single pass on boot misses responses that mount
+// later. Schedule three scans with increasing delay; each scan is
+// idempotent because rendererShow checks for an existing host
+// keyed on provocation_id / claim_dom_id and returns early on dup.
+
+const REHYDRATE_DELAYS_MS = [400, 1500, 3500]
+
+const rehydratedNodes = new WeakSet<Element>()
+
+async function rehydrateOneNode(
+  responseNode: Element,
+  platformAdapter: PlatformAdapter,
+): Promise<boolean> {
+  if (rehydratedNodes.has(responseNode)) return false
+  const responseText = platformAdapter.getResponseText(responseNode)
+  if (!responseText || responseText.length < 50) return false
+  const sessionId = platformAdapter.getSessionId()
+  const hash = hashResponse(responseText)
+  const cached = await getStoredAnalysis(sessionId, hash)
+  if (!cached) return false
+
+  rehydratedNodes.add(responseNode)
+  log(
+    `rehydrate hit | conv=${sessionId} hash=${hash} ` +
+      `validations=${cached.validations.length} ` +
+      `claims=${cached.verifiable_claims.length} ` +
+      `verdicts=${Object.keys(cached.verdicts).length}`,
+  )
+
+  // Validations render directly — they don't need verify.
+  rendererShow(responseNode, cached.validations)
+
+  // For each cached verdict: pre-populate the claim-card cache and
+  // render the contradicted ones. This must happen BEFORE the host
+  // attaches, so use the same setClaimVerdict path the live flow
+  // uses.
+  const contradictedClaims: VerifiableClaim[] = []
+  for (const [idxStr, verdict] of Object.entries(cached.verdicts)) {
+    const idx = parseInt(idxStr, 10)
+    if (Number.isNaN(idx)) continue
+    const claim = cached.verifiable_claims[idx]
+    if (!claim) continue
+    const aid = claim.analysis_id ?? cached.analysis_id
+    if (typeof aid !== 'string') continue
+    setClaimVerdict(aid, idx, verdict)
+    if (verdict.verdict === 'contradicted') {
+      contradictedClaims.push({ ...claim, analysis_id: aid, claim_index: idx })
+    }
+  }
+  if (contradictedClaims.length > 0) {
+    rendererShow(responseNode, [], contradictedClaims)
+  }
+
+  // Update the chat-status pill so the rolled-up counts include
+  // rehydrated state, not just newly-analyzed responses.
+  const signalEligibleCount = filterClaimsForVerify(
+    cached.verifiable_claims,
+  ).length
+  recordResponseAnalyzed({
+    validationCount: cached.validations.length,
+    claimCount: cached.verifiable_claims.length,
+    signalEligibleCount,
+  })
+  for (const verdict of Object.values(cached.verdicts)) {
+    recordVerdict(verdict.verdict)
+  }
+  return true
+}
+
+async function rehydrateAllNodes(platformAdapter: PlatformAdapter): Promise<void> {
+  const nodes = platformAdapter.getAllResponseNodes()
+  log(`rehydrate scan: ${nodes.length} response node(s)`)
+  for (const node of nodes) {
+    try {
+      await rehydrateOneNode(node, platformAdapter)
+    } catch (err) {
+      log('rehydrate node failed:', err)
+    }
+  }
+}
+
+function scheduleRehydrationScans(platformAdapter: PlatformAdapter): void {
+  for (const ms of REHYDRATE_DELAYS_MS) {
+    setTimeout(() => {
+      void rehydrateAllNodes(platformAdapter)
+    }, ms)
+  }
 }
 
 // ── SPA URL-change watcher ───────────────────────────────────
@@ -479,12 +615,17 @@ if (adapter) {
 
   observer.start(adapter, handleResponseComplete)
 
+  // Rehydrate any persisted analyses for responses already on the
+  // page. Backoff scan — SPA hydration is multi-frame.
+  scheduleRehydrationScans(adapter)
+
   watchUrlChange((oldUrl, newUrl) => {
     log(`url changed: ${oldUrl} → ${newUrl} — tearing down + restarting`)
     observer.tearDownUI()
     observer.stop()
     resetChatStatus()
     observer.start(adapter, handleResponseComplete)
+    scheduleRehydrationScans(adapter)
   })
 } else {
   log(`no adapter for hostname "${location.hostname}" — exiting`)
