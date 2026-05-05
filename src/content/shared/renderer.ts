@@ -113,6 +113,12 @@ const SHADOW_STYLES = `
   .card {
     position: absolute; top: 32px; right: 0;
     width: 320px; max-width: 90vw;
+    /* max-height + overflow-y mean even a very tall card (lots of
+       evidence text + sources) never extends past the viewport.
+       Combined with the JS flip-up logic in open(), the card is
+       always fully visible. */
+    max-height: 80vh;
+    overflow-y: auto;
     background: #fff; color: #111;
     border: 1px solid rgba(0,0,0,0.08);
     border-radius: 8px;

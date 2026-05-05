@@ -20,6 +20,7 @@
 // peeks via getClaimVerdict before deciding whether to fire
 // VERIFY_CLAIM, so SPA navigation back into a chat is a no-op.
 
+import { clampCardToViewport } from './card-position'
 import type {
   PlatformAdapter,
   VerifiableClaim,
@@ -244,6 +245,7 @@ export function attachClaim(
     // on top when adjacent stacked hosts would otherwise occlude it.
     host.style.zIndex = '2147483647'
     card.classList.add('open')
+    clampCardToViewport(card)
   }
   const closeSoon = (): void => {
     if (collapseTimer != null) clearTimeout(collapseTimer)

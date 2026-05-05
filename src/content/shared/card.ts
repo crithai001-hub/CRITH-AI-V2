@@ -15,6 +15,7 @@
 // The explanation is cached on the card's local state. A second tap of
 // Explain after the user navigates back does NOT re-call the backend.
 
+import { clampCardToViewport } from './card-position'
 import type { ApiError, ExplainResponse, PlatformAdapter, Validation } from '../../shared/types'
 
 const COLLAPSE_GRACE_MS = 200
@@ -240,6 +241,7 @@ export function attach(
     // 2147483640 (set in renderer.createHost / createClaimHost).
     host.style.zIndex = '2147483647'
     card.classList.add('open')
+    clampCardToViewport(card)
   }
   const closeSoon = (): void => {
     if (collapseTimer != null) clearTimeout(collapseTimer)
