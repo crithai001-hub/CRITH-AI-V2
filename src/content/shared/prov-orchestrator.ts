@@ -21,6 +21,7 @@ import { getClaimVerdict, setClaimCardAdapter, setClaimVerdict } from './claim-c
 import { classifyVerifyResult, filterClaimsForVerify } from './claim-filter'
 import { showQuotaBanner } from './quota-banner'
 import {
+  mountChatStatusPill,
   recordResponseAnalyzed,
   recordVerdict,
   resetChatStatus,
@@ -471,6 +472,10 @@ if (adapter) {
   // future "ask AI to elaborate on the verdict" affordance).
   setCardAdapter(adapter)
   setClaimCardAdapter(adapter)
+
+  // Mount the chat-status pill so it's visible from page load in
+  // idle state, not just after the first analyze.
+  mountChatStatusPill()
 
   observer.start(adapter, handleResponseComplete)
 

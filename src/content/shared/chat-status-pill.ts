@@ -83,6 +83,20 @@ export function resetChatStatus(): void {
   }
   pillEl = null
   panelEl = null
+  // Re-mount immediately so the pill stays visible across nav
+  // (just in idle state until the first analyze of the new chat).
+  ensurePill()
+  renderPill()
+}
+
+/**
+ * Boot-time mount. Renders the pill in idle state ("Crith" gray)
+ * before any response has been analyzed, so the user sees the
+ * indicator from page load and not just after their first reply.
+ */
+export function mountChatStatusPill(): void {
+  ensurePill()
+  renderPill()
 }
 
 // ── Visual mapping ───────────────────────────────────────────
@@ -124,9 +138,13 @@ function ensurePill(): void {
 function buildPill(): void {
   const host = document.createElement('div')
   host.id = PILL_ID
+  // Bottom-right of the viewport. Most AI platforms keep the
+  // bottom-right empty (the composer + send button hug the bottom-
+  // center), so this corner is consistently visible across ChatGPT,
+  // Claude, Gemini, Perplexity, Grok, and DeepSeek.
   host.style.cssText = [
     'position: fixed',
-    'top: 72px',
+    'bottom: 16px',
     'right: 16px',
     'z-index: 2147483646',
     'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -167,8 +185,10 @@ function buildPill(): void {
 
   const panel = document.createElement('div')
   panel.style.cssText = [
+    // Anchored bottom — pill is at bottom-right of the viewport, so
+    // the panel grows upward from the pill.
     'position: absolute',
-    'top: calc(100% + 8px)',
+    'bottom: calc(100% + 8px)',
     'right: 0',
     'min-width: 240px',
     'max-width: 320px',
