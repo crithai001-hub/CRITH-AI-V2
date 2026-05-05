@@ -15,6 +15,16 @@ import type {
 
 const LOG_PREFIX = '[Crith SW]'
 
+// Top-level boot log. MV3 service workers run this every time the
+// SW wakes (incoming message, alarm, install/startup, etc.), so a
+// log here proves the SW module loaded and the listener below got
+// registered. If you open chrome://extensions and click the
+// "service worker" link, the DevTools console for the SW shows
+// this line on every wake — that's the fastest way to confirm the
+// SW is healthy when chrome reports "Inactive" (which just means
+// "currently idle", not "broken").
+console.log(`${LOG_PREFIX} module loaded @ ${new Date().toISOString()}`)
+
 // ── Lifecycle ────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener((details) => {
