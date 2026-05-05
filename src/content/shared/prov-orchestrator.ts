@@ -73,7 +73,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   chatgpt:    '#10A37F',
   claude:     '#D97757',
   gemini:     '#4285F4',
-  perplexity: '#20B8CD',
+  perplexity: '#20808D',
   grok:       '#E5E5E5',
   deepseek:   '#4D6BFE',
 }
