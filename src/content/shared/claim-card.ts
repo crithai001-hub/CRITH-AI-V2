@@ -236,14 +236,17 @@ export function attachClaim(
       clearTimeout(collapseTimer)
       collapseTimer = null
     }
+    // Raise the host above its siblings so the expanded card draws
+    // on top when adjacent stacked hosts would otherwise occlude it.
+    host.style.zIndex = '2147483647'
     card.classList.add('open')
   }
   const closeSoon = (): void => {
     if (collapseTimer != null) clearTimeout(collapseTimer)
-    collapseTimer = setTimeout(
-      () => card.classList.remove('open'),
-      COLLAPSE_GRACE_MS,
-    )
+    collapseTimer = setTimeout(() => {
+      card.classList.remove('open')
+      host.style.zIndex = '2147483640'
+    }, COLLAPSE_GRACE_MS)
   }
   const cancelClose = (): void => {
     if (collapseTimer != null) {

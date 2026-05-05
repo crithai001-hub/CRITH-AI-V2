@@ -810,7 +810,11 @@ function createHost(
   // the conversation thread has its own inner scroll container — so an
   // absolutely-positioned host anchored to body would stay at a fixed
   // PAGE coordinate and become off-screen the moment the chat scrolls.
-  host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483647; pointer-events: none;'
+  // Base z-index sits one below max so we have one slot to raise the
+  // host into when its card opens — see card.ts/claim-card.ts open()
+  // which bumps to 2147483647 so the open card overlaps adjacent
+  // hosts whose stacks would otherwise occlude it.
+  host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483640; pointer-events: none;'
   const root = host.attachShadow({ mode: 'open' })
 
   const style = document.createElement('style')
@@ -928,7 +932,11 @@ function createClaimHost(
   if (claim.hallucination_signal === 'high') {
     host.setAttribute('data-hallucination', 'high')
   }
-  host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483647; pointer-events: none;'
+  // Base z-index sits one below max so we have one slot to raise the
+  // host into when its card opens — see card.ts/claim-card.ts open()
+  // which bumps to 2147483647 so the open card overlaps adjacent
+  // hosts whose stacks would otherwise occlude it.
+  host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483640; pointer-events: none;'
   const root = host.attachShadow({ mode: 'open' })
 
   const style = document.createElement('style')
