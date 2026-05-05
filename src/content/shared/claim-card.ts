@@ -91,8 +91,9 @@ function verdictLabel(verdict: Verdict): string {
     // Single user-facing label for any AI mistake — verified-false
     // facts AND generation_artifact glitches both surface here. The
     // user's mental model is "this is a hallucination," regardless
-    // of which of the two backend paths produced it.
-    case 'contradicted': return 'Hallucination'
+    // of which of the two backend paths produced it. Warning glyph
+    // adds visual weight without crowding the badge.
+    case 'contradicted': return '⚠ Hallucination'
     case 'inconclusive': return '? Inconclusive'
     case 'error': return '! Error'
   }

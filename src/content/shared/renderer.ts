@@ -285,78 +285,144 @@ const SHADOW_STYLES = `
      between fact-check and hallucination happens via the small
      top-right .crith-prov-dot, set in createClaimHost. */
 
-  :host([data-kind="claim"]) .card {
-    width: 360px;
+  /* Card variables — base accent for fact-check (amber), overridden
+   * to purple by the [data-hallucination="high"] selector below.
+   * Single source of truth so verdict / sources / accent stripe all
+   * stay in sync without repeating color triplets across rules. */
+  :host([data-kind="claim"]) {
+    --crith-accent:        #d97706;
+    --crith-accent-strong: #b45309;
+    --crith-accent-bg:     rgba(245, 158, 11, 0.10);
+    --crith-accent-bg-strong: rgba(245, 158, 11, 0.18);
+    --crith-accent-border: rgba(245, 158, 11, 0.40);
   }
+  :host([data-kind="claim"][data-hallucination="high"]) {
+    --crith-accent:        #9333ea;
+    --crith-accent-strong: #6b21a8;
+    --crith-accent-bg:     rgba(168, 85, 247, 0.10);
+    --crith-accent-bg-strong: rgba(168, 85, 247, 0.18);
+    --crith-accent-border: rgba(168, 85, 247, 0.40);
+  }
+
+  :host([data-kind="claim"]) .card {
+    width: 380px;
+    padding: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+  }
+
+  /* Top accent stripe — communicates "fact-check" vs "hallucination"
+   * at a glance before the user reads anything. */
+  :host([data-kind="claim"]) .card::before {
+    content: '';
+    display: block;
+    height: 4px;
+    background: var(--crith-accent);
+  }
+
+  /* All inner sections wrap inside the existing flat .card layout —
+   * use uniform horizontal padding and tighter section margins. */
+  :host([data-kind="claim"]) .claim-header,
+  :host([data-kind="claim"]) .claim-text,
+  :host([data-kind="claim"]) .why-verify,
+  :host([data-kind="claim"]) .verify-result,
+  :host([data-kind="claim"]) .controls {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  /* ── Header: verdict badge + meta chips ───────────────────── */
   :host([data-kind="claim"]) .claim-header {
     display: flex;
     gap: 6px;
-    margin: 0 0 8px 0;
+    flex-wrap: wrap;
     align-items: center;
+    margin: 0;
+    padding-top: 14px;
+    padding-bottom: 0;
   }
   :host([data-kind="claim"]) .claim-type-badge,
   :host([data-kind="claim"]) .risk-badge {
     font-size: 9.5px;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    padding: 2px 6px;
-    border-radius: 3px;
+    letter-spacing: 0.06em;
+    padding: 3px 7px;
+    border-radius: 999px;
     text-transform: uppercase;
+    line-height: 1;
   }
   :host([data-kind="claim"]) .claim-type-badge {
-    background: rgba(0, 0, 0, 0.05);
-    color: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.045);
+    color: rgba(0, 0, 0, 0.55);
   }
   :host([data-kind="claim"]) .risk-badge[data-risk="high"] {
-    background: rgba(245, 158, 11, 0.18);
-    color: #b45309;
+    background: var(--crith-accent-bg-strong);
+    color: var(--crith-accent-strong);
   }
   :host([data-kind="claim"]) .risk-badge[data-risk="medium"] {
-    background: rgba(245, 158, 11, 0.10);
-    color: #92560b;
+    background: var(--crith-accent-bg);
+    color: var(--crith-accent-strong);
   }
   :host([data-kind="claim"]) .risk-badge[data-risk="low"] {
     background: rgba(0, 0, 0, 0.05);
-    color: rgba(0, 0, 0, 0.55);
+    color: rgba(0, 0, 0, 0.5);
   }
+
+  /* ── Claim text: the quote being checked ──────────────────── */
   :host([data-kind="claim"]) .claim-text {
-    margin: 0 0 6px 0;
-    font-size: 13px;
-    line-height: 1.45;
+    margin: 10px 0 4px 0;
+    font-size: 13.5px;
+    line-height: 1.5;
     font-weight: 500;
+    color: rgba(0, 0, 0, 0.85);
+    /* Subtle leading quote glyph so the user knows this is the
+     * AI's text, not our commentary. */
+    border-left: 2px solid var(--crith-accent);
+    padding-left: 10px;
+    margin-left: 16px;
+    padding-right: 0;
   }
   :host([data-kind="claim"]) .why-verify {
-    margin: 0 0 10px 0;
-    font-size: 12px;
-    line-height: 1.4;
-    color: rgba(0, 0, 0, 0.6);
+    margin: 0 0 12px 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: rgba(0, 0, 0, 0.5);
     font-style: italic;
   }
+
+  /* ── Verify result: verdict hero + evidence + sources ─────── */
   :host([data-kind="claim"]) .verify-result {
-    margin: 0 0 10px 0;
-    padding: 8px 10px;
-    background: rgba(0, 0, 0, 0.025);
-    border-left: 3px solid rgba(0, 0, 0, 0.1);
-    border-radius: 0 6px 6px 0;
+    margin: 0;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    background: var(--crith-accent-bg);
+    border-top: 1px solid var(--crith-accent-border);
   }
   :host([data-kind="claim"]) .verdict-badge {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    padding: 3px 8px;
-    border-radius: 4px;
-    margin: 0 0 6px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 5px 12px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    margin: 0 0 10px 0;
   }
+  /* Generic verdict states — only contradicted is reachable in
+   * the new flow, but the others stay defined for any future
+   * confirmed / inconclusive surface. */
   :host([data-kind="claim"]) .verdict-confirmed {
     background: rgba(16, 163, 127, 0.15);
     color: #047857;
-    border: 1px solid rgba(16, 163, 127, 0.3);
+    border: 1px solid rgba(16, 163, 127, 0.35);
   }
   :host([data-kind="claim"]) .verdict-contradicted {
-    background: rgba(193, 39, 45, 0.15);
-    color: #c1272d;
-    border: 1px solid rgba(193, 39, 45, 0.3);
+    background: var(--crith-accent-bg-strong);
+    color: var(--crith-accent-strong);
+    border: 1px solid var(--crith-accent-border);
   }
   :host([data-kind="claim"]) .verdict-inconclusive {
     background: rgba(0, 0, 0, 0.06);
@@ -364,128 +430,121 @@ const SHADOW_STYLES = `
     border: 1px solid rgba(0, 0, 0, 0.15);
   }
   :host([data-kind="claim"]) .verdict-error {
-    background: rgba(245, 158, 11, 0.15);
-    color: #b45309;
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(0, 0, 0, 0.05);
+    color: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(0, 0, 0, 0.15);
   }
   :host([data-kind="claim"]) .evidence {
-    margin: 4px 0 8px 0;
-    font-size: 12px;
-    line-height: 1.45;
+    margin: 0 0 10px 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: rgba(0, 0, 0, 0.78);
   }
   :host([data-kind="claim"]) .sources-details {
     font-size: 11.5px;
   }
   :host([data-kind="claim"]) .sources-summary {
     cursor: pointer;
-    color: #b45309;
+    color: var(--crith-accent-strong);
     user-select: none;
-    font-weight: 500;
+    font-weight: 600;
     outline: none;
     list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
   :host([data-kind="claim"]) .sources-summary::-webkit-details-marker {
     display: none;
   }
   :host([data-kind="claim"]) .sources-summary::before {
-    content: '\\25b6\\00a0';
+    content: '\\25b6';
     display: inline-block;
-    font-size: 9px;
-    transition: transform 120ms ease;
+    font-size: 8px;
+    transition: transform 160ms ease;
+    color: var(--crith-accent);
   }
   :host([data-kind="claim"]) .sources-details[open] .sources-summary::before {
     transform: rotate(90deg);
   }
   :host([data-kind="claim"]) .sources-list {
     list-style: none;
-    margin: 6px 0 0 0;
-    padding: 0 0 0 14px;
+    margin: 8px 0 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
   :host([data-kind="claim"]) .sources-list li {
-    margin: 4px 0;
+    margin: 0;
     padding: 0;
   }
   :host([data-kind="claim"]) .sources-list a {
-    color: #b45309;
+    display: inline-block;
+    color: var(--crith-accent-strong);
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid var(--crith-accent-border);
+    padding: 4px 10px;
+    border-radius: 999px;
     text-decoration: none;
     font-size: 11.5px;
+    font-weight: 500;
     word-break: break-all;
+    transition: background 120ms ease, border-color 120ms ease;
   }
   :host([data-kind="claim"]) .sources-list a:hover {
-    text-decoration: underline;
-  }
-  /* Verify primary button uses amber instead of platform color. */
-  :host([data-kind="claim"]) .card .controls .btn-primary {
-    background: #F59E0B;
-    color: #fff;
-  }
-  :host([data-kind="claim"]) .card .controls .btn-primary:hover:not(:disabled) {
-    filter: brightness(0.93);
+    background: rgba(255, 255, 255, 0.9);
+    border-color: var(--crith-accent);
   }
 
-  /* ── Hallucination overrides (purple) ──────────────────────
-   * When data-hallucination="high" is on the host, swap card
-   * accents for purple #A855F7. The LOGO stays platform-colored
-   * (set by the base rule); differentiation between fact-check
-   * and hallucination is communicated via the .crith-prov-dot
-   * top-right — yellow for fact-check, purple for hallucination,
-   * applied in createClaimHost. */
-  :host([data-kind="claim"][data-hallucination="high"]) .verdict-contradicted {
-    background: rgba(168, 85, 247, 0.18);
-    color: #6b21a8;
-    border: 1px solid rgba(168, 85, 247, 0.35);
-  }
-  :host([data-kind="claim"][data-hallucination="high"]) .risk-badge[data-risk="high"],
-  :host([data-kind="claim"][data-hallucination="high"]) .risk-badge[data-risk="medium"] {
-    background: rgba(168, 85, 247, 0.18);
-    color: #6b21a8;
-  }
-  :host([data-kind="claim"][data-hallucination="high"]) .sources-summary,
-  :host([data-kind="claim"][data-hallucination="high"]) .sources-list a {
-    color: #6b21a8;
-  }
-  @media (prefers-color-scheme: dark) {
-    :host([data-kind="claim"][data-hallucination="high"]) .verdict-contradicted {
-      background: rgba(168, 85, 247, 0.22);
-      color: #d8b4fe;
-    }
-    :host([data-kind="claim"][data-hallucination="high"]) .sources-summary,
-    :host([data-kind="claim"][data-hallucination="high"]) .sources-list a {
-      color: #d8b4fe;
-    }
+  /* ── Footer controls ──────────────────────────────────────── */
+  :host([data-kind="claim"]) .controls {
+    padding-top: 12px;
+    padding-bottom: 14px;
   }
 
   @media (prefers-color-scheme: dark) {
+    :host([data-kind="claim"]) {
+      --crith-accent-bg:     rgba(245, 158, 11, 0.14);
+      --crith-accent-bg-strong: rgba(245, 158, 11, 0.22);
+    }
+    :host([data-kind="claim"][data-hallucination="high"]) {
+      --crith-accent:        #c084fc;
+      --crith-accent-strong: #d8b4fe;
+      --crith-accent-bg:     rgba(168, 85, 247, 0.16);
+      --crith-accent-bg-strong: rgba(168, 85, 247, 0.26);
+      --crith-accent-border: rgba(168, 85, 247, 0.45);
+    }
     :host([data-kind="claim"]) .claim-type-badge {
-      background: rgba(255, 255, 255, 0.07);
-      color: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.06);
+      color: rgba(255, 255, 255, 0.65);
     }
     :host([data-kind="claim"]) .risk-badge[data-risk="low"] {
       background: rgba(255, 255, 255, 0.06);
-      color: rgba(255, 255, 255, 0.6);
+      color: rgba(255, 255, 255, 0.55);
+    }
+    :host([data-kind="claim"]) .claim-text {
+      color: rgba(255, 255, 255, 0.92);
     }
     :host([data-kind="claim"]) .why-verify {
-      color: rgba(255, 255, 255, 0.6);
+      color: rgba(255, 255, 255, 0.55);
     }
-    :host([data-kind="claim"]) .verify-result {
-      background: rgba(255, 255, 255, 0.04);
-      border-left-color: rgba(255, 255, 255, 0.1);
+    :host([data-kind="claim"]) .evidence {
+      color: rgba(255, 255, 255, 0.85);
     }
     :host([data-kind="claim"]) .verdict-confirmed {
-      background: rgba(16, 163, 127, 0.2);
+      background: rgba(16, 163, 127, 0.22);
       color: #34d399;
-    }
-    :host([data-kind="claim"]) .verdict-contradicted {
-      background: rgba(255, 105, 97, 0.2);
-      color: #ff6961;
     }
     :host([data-kind="claim"]) .verdict-inconclusive {
       background: rgba(255, 255, 255, 0.08);
-      color: rgba(255, 255, 255, 0.6);
+      color: rgba(255, 255, 255, 0.65);
     }
-    :host([data-kind="claim"]) .sources-summary,
     :host([data-kind="claim"]) .sources-list a {
-      color: #fbbf24;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    :host([data-kind="claim"]) .sources-list a:hover {
+      background: rgba(255, 255, 255, 0.12);
     }
   }
 `
