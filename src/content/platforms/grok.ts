@@ -23,31 +23,40 @@ const SEL = {
     'main',
   ],
   responseNode: [
-    '[class*="BotMessage"]',
-    '[class*="AssistantMessage"]',
-    '[data-message-author="assistant"]',
+    // Verified live (2026-05): both user and assistant bubbles use
+    // .message-bubble, but assistant bubbles render markdown so
+    // they also carry .prose. User bubbles are plain text, no
+    // prose. The combined selector picks the AI side specifically
+    // and doesn't trigger on user messages.
+    'div[class*="message-bubble"][class*="prose"]',
+    // Future-proof attribute-based selectors. xAI may add these
+    // later; if they do, isResponseNode picks them up first.
     '[data-message-author-role="assistant"]',
+    '[data-message-author="assistant"]',
     '[data-testid*="grok-message"]',
     '[data-testid*="assistant-message"]',
+    // Legacy class fragments — kept as fallback for any older
+    // build paths that still ship through.
+    '[class*="BotMessage"]',
+    '[class*="AssistantMessage"]',
     '[class*="response-bubble"]',
-    'div[class*="response"][class*="message"]',
-    // Markdown-rendered content blocks. Grok 2026 shells most
-    // assistant text inside .prose like ChatGPT does. Direct
-    // .prose match is broader than ideal but safe under
-    // isResponseNode's strict-direct-match contract.
-    'div[class*="prose"]',
     'article[class*="response"]',
+    // Removed [class*="prose"]: it substring-matches "ProseMirror"
+    // (the tiptap input editor's class) AND every "prose-*"
+    // tailwind utility on every styled child block, producing many
+    // false-positive response nodes per real reply.
   ],
   promptNodeForResponse: [
+    // Same .message-bubble wrapper used for both sides. The
+    // getPromptForResponse walker takes the previous bubble in
+    // sibling/ancestor order — that's the user prompt.
+    'div[class*="message-bubble"]',
     '[class*="UserMessage"]',
     '[class*="HumanMessage"]',
     '[data-message-author="user"]',
     '[data-message-author-role="user"]',
     '[data-testid*="user-message"]',
     '[class*="human"]',
-    // User bubbles in current Grok layouts often carry self-end /
-    // bg-* utility class fragments to right-align them. Catch the
-    // most stable patterns we've seen.
     'div[class*="user-message"]',
     'div[class*="UserBubble"]',
   ],
