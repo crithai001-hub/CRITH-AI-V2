@@ -238,11 +238,15 @@ const SHADOW_STYLES = `
   /* ── Claim host overrides ─────────────────────────────────
      Selectors are scoped via :host([data-kind="claim"]) so they
      only apply to claim hosts; validation hosts (no data-kind
-     or data-kind="validation") get the styles above unchanged. */
+     or data-kind="validation") get the styles above unchanged.
 
-  :host([data-kind="claim"]) .crith-prov-logo {
-    background: #F59E0B;
-  }
+     Note: claim hosts intentionally inherit the platform brand
+     color from the base .crith-prov-logo rule (var(--crith-prov-color))
+     — same logo color as validations, same as the platform's accent
+     (green on ChatGPT, orange on Claude, etc.). Differentiation
+     between fact-check and hallucination happens via the small
+     top-right .crith-prov-dot, set in createClaimHost. */
+
   :host([data-kind="claim"]) .card {
     width: 360px;
   }
@@ -382,13 +386,12 @@ const SHADOW_STYLES = `
   }
 
   /* ── Hallucination overrides (purple) ──────────────────────
-   * When data-hallucination="high" is on the host, swap amber
-   * accents for purple #A855F7 to mark "this is a probable
-   * fabrication, not just a fact-check miss." Only applies to
-   * claim hosts; validation hosts are unaffected. */
-  :host([data-kind="claim"][data-hallucination="high"]) .crith-prov-logo {
-    background: #A855F7;
-  }
+   * When data-hallucination="high" is on the host, swap card
+   * accents for purple #A855F7. The LOGO stays platform-colored
+   * (set by the base rule); differentiation between fact-check
+   * and hallucination is communicated via the .crith-prov-dot
+   * top-right — yellow for fact-check, purple for hallucination,
+   * applied in createClaimHost. */
   :host([data-kind="claim"][data-hallucination="high"]) .verdict-contradicted {
     background: rgba(168, 85, 247, 0.18);
     color: #6b21a8;
@@ -948,11 +951,24 @@ function createClaimHost(
 
   const logo = document.createElement('div')
   logo.className = 'crith-prov-logo'
-  logo.title = 'Crith fact-check'
+  // Logo background is the platform brand color via the base
+  // .crith-prov-logo rule (--crith-prov-color). Differentiation
+  // between fact-check and hallucination is in the dot below.
+  const isHallucinationLogo = claim.hallucination_signal === 'high'
+  logo.title = isHallucinationLogo
+    ? 'Crith — likely hallucination'
+    : 'Crith — fact-checked'
   logo.appendChild(buildBrandMark())
-  // Claim hosts don't render a lens dot — the amber logo color (set
-  // via :host([data-kind="claim"]) .crith-prov-logo) already signals
-  // "this is a fact-check, not a critique".
+  // Top-right indicator dot. Same DOM + CSS pattern validations use
+  // for sycophancy/hallucination LENS dots; here it carries the
+  // claim-vs-fact-check distinction the user can read at a glance:
+  //   yellow #F59E0B → generic fact-check (verified contradicted)
+  //   purple #A855F7 → hallucination (high-signal contradiction or
+  //                    generation_artifact)
+  const dot = document.createElement('div')
+  dot.className = 'crith-prov-dot'
+  dot.style.background = isHallucinationLogo ? '#A855F7' : '#F59E0B'
+  logo.appendChild(dot)
   wrap.appendChild(logo)
 
   const card = document.createElement('div')
