@@ -381,6 +381,39 @@ const SHADOW_STYLES = `
     filter: brightness(0.93);
   }
 
+  /* ── Hallucination overrides (purple) ──────────────────────
+   * When data-hallucination="high" is on the host, swap amber
+   * accents for purple #A855F7 to mark "this is a probable
+   * fabrication, not just a fact-check miss." Only applies to
+   * claim hosts; validation hosts are unaffected. */
+  :host([data-kind="claim"][data-hallucination="high"]) .crith-prov-logo {
+    background: #A855F7;
+  }
+  :host([data-kind="claim"][data-hallucination="high"]) .verdict-contradicted {
+    background: rgba(168, 85, 247, 0.18);
+    color: #6b21a8;
+    border: 1px solid rgba(168, 85, 247, 0.35);
+  }
+  :host([data-kind="claim"][data-hallucination="high"]) .risk-badge[data-risk="high"],
+  :host([data-kind="claim"][data-hallucination="high"]) .risk-badge[data-risk="medium"] {
+    background: rgba(168, 85, 247, 0.18);
+    color: #6b21a8;
+  }
+  :host([data-kind="claim"][data-hallucination="high"]) .sources-summary,
+  :host([data-kind="claim"][data-hallucination="high"]) .sources-list a {
+    color: #6b21a8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :host([data-kind="claim"][data-hallucination="high"]) .verdict-contradicted {
+      background: rgba(168, 85, 247, 0.22);
+      color: #d8b4fe;
+    }
+    :host([data-kind="claim"][data-hallucination="high"]) .sources-summary,
+    :host([data-kind="claim"][data-hallucination="high"]) .sources-list a {
+      color: #d8b4fe;
+    }
+  }
+
   @media (prefers-color-scheme: dark) {
     :host([data-kind="claim"]) .claim-type-badge {
       background: rgba(255, 255, 255, 0.07);
@@ -597,9 +630,11 @@ function renderClaimItem(
   // we filter by the host's data-kind so we don't wipe a validation
   // when adding a claim).
 
+  const isHallucination = claim.hallucination_signal === 'high'
   const spans = wrapUnderline(responseNode, claim.anchored_to, {
     kind: 'claim',
     risk: claim.risk,
+    hallucination: isHallucination,
   })
   if (spans.length === 0) return false
   const firstSpan = spans[0]
@@ -669,7 +704,7 @@ function logHostPlaced(
 
 type UnderlineDecoration =
   | { kind: 'validation'; lens: Lens }
-  | { kind: 'claim'; risk: Risk }
+  | { kind: 'claim'; risk: Risk; hallucination: boolean }
 
 function wrapUnderline(
   responseNode: Element,
@@ -730,6 +765,14 @@ function wrapUnderline(
     } else {
       span.setAttribute('data-crith-prov-kind', 'claim')
       span.setAttribute('data-crith-risk', decoration.risk)
+      // Stamp the hallucination flag so the page-DOM CSS can swap
+      // the amber dotted underline for purple. The attribute is
+      // only present when hallucination_signal === 'high' AND the
+      // verify pipeline returned `contradicted` — the strongest
+      // available "AI fabricated this" signal.
+      if (decoration.hallucination) {
+        span.setAttribute('data-crith-hallucination', 'true')
+      }
     }
     span.textContent = middle
     const parent = w.node.parentNode
@@ -877,6 +920,14 @@ function createClaimHost(
   const host = document.createElement('crith-prov-host') as HostWithShadow
   host.setAttribute('data-prov-id', claimDomId)
   host.setAttribute('data-kind', 'claim')
+  // Stamp hallucination signal so SHADOW_STYLES can swap the amber
+  // host accents for purple. We only set the attribute when the
+  // claim is a high-signal hallucination — medium/none never
+  // reach the render path (medium that came back contradicted is
+  // a "fact-check failed" finding but not a fabrication tell).
+  if (claim.hallucination_signal === 'high') {
+    host.setAttribute('data-hallucination', 'high')
+  }
   host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483647; pointer-events: none;'
   const root = host.attachShadow({ mode: 'open' })
 

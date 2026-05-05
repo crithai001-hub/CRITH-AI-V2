@@ -70,3 +70,20 @@ span.crith-prov-underline[data-crith-prov-kind="claim"][data-crith-risk="low"] {
   opacity: 0.7;
   text-decoration-thickness: 1.2px;
 }
+
+/* ── Hallucination override (purple) ──────────────────────────
+ * Strongest tier: claim was flagged with hallucination_signal=high
+ * AND the verify pipeline returned `contradicted`. The renderer
+ * stamps data-crith-hallucination="true" only in that case, so
+ * matching here gives the amber-vs-purple split the user expects.
+ *
+ * Specificity: span tag + class + 3 attributes = (0,4,1). Beats
+ * the (0,3,1) amber claim rules above so risk-tiered amber styles
+ * are overridden but the underline-thickness from those rules is
+ * preserved by inheriting through text-decoration-thickness which
+ * we don't override here. */
+span.crith-prov-underline[data-crith-prov-kind="claim"][data-crith-hallucination="true"] {
+  text-decoration-color: #A855F7;
+  opacity: 1;
+}
+

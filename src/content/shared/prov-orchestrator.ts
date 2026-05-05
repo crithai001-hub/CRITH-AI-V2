@@ -325,10 +325,14 @@ async function handleResponseComplete(params: {
   // Update the chat-level status pill with this response's totals
   // BEFORE firing verify — the pill should reflect "we found N
   // claims, sent K to verify" even before any verdicts come back.
+  const highSignalCount = enrichedClaims.filter(
+    (c) => c.hallucination_signal === 'high',
+  ).length
   recordResponseAnalyzed({
     validationCount: enriched.length,
     claimCount: enrichedClaims.length,
     signalEligibleCount: candidates.length,
+    highSignalCount,
   })
 
   // Persist the analyze result so a refresh can rehydrate the same
@@ -397,7 +401,11 @@ async function verifyAndRenderContradicted(
         log(
           `VERIFY_CLAIM cache-hit claim_index=${idx} verdict=${cached.verdict}`,
         )
-        recordVerdict(cached.verdict)
+        recordVerdict(cached.verdict, {
+          ...(claim.hallucination_signal !== undefined
+            ? { hallucinationSignal: claim.hallucination_signal }
+            : {}),
+        })
         void saveVerdict(conversationId, responseHash, idx, cached)
         if (cached.verdict === 'contradicted' && document.body.contains(responseNode)) {
           rendererShow(responseNode, [], [claim])
@@ -440,7 +448,11 @@ async function verifyAndRenderContradicted(
         typeof (raw as { verdict?: unknown }).verdict === 'string'
       ) {
         const v = raw as VerifyClaimResponse
-        recordVerdict(v.verdict)
+        recordVerdict(v.verdict, {
+          ...(claim.hallucination_signal !== undefined
+            ? { hallucinationSignal: claim.hallucination_signal }
+            : {}),
+        })
         // Persist non-contradicted verdicts too so refresh re-counts
         // them on the pill without re-firing verify. The contradicted
         // path saves again below (idempotent) for the render branch.
@@ -547,13 +559,23 @@ async function rehydrateOneNode(
   const signalEligibleCount = filterClaimsForVerify(
     cached.verifiable_claims,
   ).length
+  const highSignalCount = cached.verifiable_claims.filter(
+    (c) => c.hallucination_signal === 'high',
+  ).length
   recordResponseAnalyzed({
     validationCount: cached.validations.length,
     claimCount: cached.verifiable_claims.length,
     signalEligibleCount,
+    highSignalCount,
   })
-  for (const verdict of Object.values(cached.verdicts)) {
-    recordVerdict(verdict.verdict)
+  for (const [idxStr, verdict] of Object.entries(cached.verdicts)) {
+    const idx = parseInt(idxStr, 10)
+    const claim = cached.verifiable_claims[idx]
+    recordVerdict(verdict.verdict, {
+      ...(claim?.hallucination_signal !== undefined
+        ? { hallucinationSignal: claim.hallucination_signal }
+        : {}),
+    })
   }
   return true
 }

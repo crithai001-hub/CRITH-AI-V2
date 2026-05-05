@@ -26,9 +26,13 @@ type ChatStatus = {
   validations: number
   claims_detected: number
   claims_signal_eligible: number
+  /** Subset of detected claims with hallucination_signal=high. */
+  claims_high_signal: number
   claims_contradicted: number
   claims_confirmed: number
   claims_inconclusive: number
+  /** Confirmed hallucinations: high signal AND verdict=contradicted. */
+  hallucinations_confirmed: number
 }
 
 const initial: ChatStatus = {
@@ -36,9 +40,11 @@ const initial: ChatStatus = {
   validations: 0,
   claims_detected: 0,
   claims_signal_eligible: 0,
+  claims_high_signal: 0,
   claims_contradicted: 0,
   claims_confirmed: 0,
   claims_inconclusive: 0,
+  hallucinations_confirmed: 0,
 }
 
 let status: ChatStatus = { ...initial }
@@ -52,24 +58,40 @@ let collapseTimer: ReturnType<typeof setTimeout> | null = null
  * Called by the orchestrator after each ANALYZE returns successfully.
  * `validationCount` and `claimCount` are post-enrichment counts.
  * `signalEligibleCount` is the subset that will be sent to verify.
+ * `highSignalCount` is the subset of those with hallucination_signal=high
+ * (the strongest "AI fabricated this" tell from the extractor).
  */
 export function recordResponseAnalyzed(params: {
   validationCount: number
   claimCount: number
   signalEligibleCount: number
+  highSignalCount: number
 }): void {
   status.responses_analyzed += 1
   status.validations += params.validationCount
   status.claims_detected += params.claimCount
   status.claims_signal_eligible += params.signalEligibleCount
+  status.claims_high_signal += params.highSignalCount
   ensurePill()
   renderPill()
 }
 
-/** Called for each verify response, regardless of verdict. */
-export function recordVerdict(verdict: string): void {
-  if (verdict === 'contradicted') status.claims_contradicted += 1
-  else if (verdict === 'confirmed') status.claims_confirmed += 1
+/**
+ * Called for each verify response, regardless of verdict.
+ * `signal` lets us count the subset of contradicted claims that
+ * were also flagged as high hallucination_signal — i.e. confirmed
+ * fabrications, the strongest finding the system can produce.
+ */
+export function recordVerdict(
+  verdict: string,
+  opts: { hallucinationSignal?: 'high' | 'medium' | 'none' } = {},
+): void {
+  if (verdict === 'contradicted') {
+    status.claims_contradicted += 1
+    if (opts.hallucinationSignal === 'high') {
+      status.hallucinations_confirmed += 1
+    }
+  } else if (verdict === 'confirmed') status.claims_confirmed += 1
   else if (verdict === 'inconclusive') status.claims_inconclusive += 1
   ensurePill()
   renderPill()
@@ -105,7 +127,11 @@ type StatusLevel = 'idle' | 'clean' | 'flagged' | 'critical'
 
 function deriveLevel(s: ChatStatus): StatusLevel {
   if (s.responses_analyzed === 0) return 'idle'
-  if (s.claims_contradicted >= 3) return 'critical'
+  // Even ONE confirmed hallucination is a critical finding — that's
+  // a fabricated fact the user might rely on. Generic contradicted
+  // claims escalate to critical at 3+ since they can be more
+  // marginal (e.g. stale-but-not-fabricated facts).
+  if (s.hallucinations_confirmed >= 1 || s.claims_contradicted >= 3) return 'critical'
   if (s.claims_contradicted >= 1) return 'flagged'
   return 'clean'
 }
@@ -246,15 +272,20 @@ function renderPill(): void {
   pill.style.border = `1px solid ${colors.ring}`
   dot.style.background = colors.fg
 
-  // Compact label: most informative single number.
+  // Compact label: most informative single number. Hallucinations
+  // win the slot if any — they're the strongest finding.
   const compact =
-    status.claims_contradicted > 0
-      ? `${status.claims_contradicted} false`
-      : status.responses_analyzed === 0
-        ? 'Crith'
-        : `${status.validations + status.claims_signal_eligible} flag${
-            status.validations + status.claims_signal_eligible === 1 ? '' : 's'
-          }`
+    status.hallucinations_confirmed > 0
+      ? `${status.hallucinations_confirmed} hallucinat${
+          status.hallucinations_confirmed === 1 ? 'ion' : 'ions'
+        }`
+      : status.claims_contradicted > 0
+        ? `${status.claims_contradicted} false`
+        : status.responses_analyzed === 0
+          ? 'Crith'
+          : `${status.validations + status.claims_signal_eligible} flag${
+              status.validations + status.claims_signal_eligible === 1 ? '' : 's'
+            }`
   label.textContent = compact
 
   renderPanel(level)
@@ -291,18 +322,37 @@ function renderPanel(level: StatusLevel): void {
   header.appendChild(headerLevel)
   panelEl.appendChild(header)
 
-  const rows: Array<{ label: string; value: string; emphasis?: boolean }> = [
+  const rows: Array<{
+    label: string
+    value: string
+    emphasis?: boolean
+    purple?: boolean
+  }> = [
     { label: 'Responses analyzed', value: String(status.responses_analyzed) },
     { label: 'Critical-thinking flags', value: String(status.validations) },
     { label: 'Claims detected', value: String(status.claims_detected) },
+    {
+      label: 'Suspicious (high signal)',
+      value: String(status.claims_high_signal),
+      purple: status.claims_high_signal > 0,
+    },
     {
       label: 'Sent for fact-check',
       value: String(status.claims_signal_eligible),
     },
     {
-      label: 'Verified false',
-      value: String(status.claims_contradicted),
-      emphasis: status.claims_contradicted > 0,
+      label: 'Hallucinations',
+      value: String(status.hallucinations_confirmed),
+      emphasis: status.hallucinations_confirmed > 0,
+      purple: status.hallucinations_confirmed > 0,
+    },
+    {
+      label: 'Verified false (other)',
+      value: String(
+        Math.max(0, status.claims_contradicted - status.hallucinations_confirmed),
+      ),
+      emphasis:
+        status.claims_contradicted - status.hallucinations_confirmed > 0,
     },
     {
       label: 'Verified true',
@@ -330,10 +380,15 @@ function renderPanel(level: StatusLevel): void {
     k.style.cssText = 'color: rgba(0, 0, 0, 0.6);'
     const v = document.createElement('span')
     v.textContent = row.value
+    const valueColor = row.purple
+      ? '#7e22ce'
+      : row.emphasis
+        ? '#c1272d'
+        : '#111'
     v.style.cssText = [
       'font-variant-numeric: tabular-nums',
-      'font-weight: ' + (row.emphasis ? '700' : '500'),
-      'color: ' + (row.emphasis ? '#c1272d' : '#111'),
+      'font-weight: ' + (row.emphasis || row.purple ? '700' : '500'),
+      'color: ' + valueColor,
       'text-align: right',
     ].join('; ')
     list.appendChild(k)
