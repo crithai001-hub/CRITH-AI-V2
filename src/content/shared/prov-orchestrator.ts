@@ -18,7 +18,12 @@ import * as observer from './observer'
 import { show as rendererShow } from './renderer'
 import { setCardAdapter } from './card'
 import { getClaimVerdict, setClaimCardAdapter, setClaimVerdict } from './claim-card'
-import { classifyVerifyResult, filterClaimsForVerify } from './claim-filter'
+import {
+  classifyVerifyResult,
+  filterClaimsForVerify,
+  partitionCandidates,
+  synthesizeArtifactVerdict,
+} from './claim-filter'
 import { showQuotaBanner } from './quota-banner'
 import {
   getStoredAnalysis,
@@ -347,7 +352,52 @@ async function handleResponseComplete(params: {
   })
 
   if (candidates.length > 0) {
-    void verifyAndRenderContradicted(node, candidates, sessionId, responseHash)
+    // Split off generation_artifact claims — they render immediately
+    // with a synthesized contradicted verdict (no Brave call) since
+    // search can't corroborate a glitch like a stray French word.
+    // Other claim_types still go through VERIFY_CLAIM and only
+    // render on a real `contradicted` verdict.
+    const { artifacts, factual } = partitionCandidates(candidates)
+    if (artifacts.length > 0) {
+      log(`artifacts=${artifacts.length} — short-circuit render (no verify)`)
+      renderArtifactClaims(node, artifacts, sessionId, responseHash)
+    }
+    if (factual.length > 0) {
+      void verifyAndRenderContradicted(node, factual, sessionId, responseHash)
+    }
+  }
+}
+
+/**
+ * Render generation_artifact claims directly. Synthesizes a
+ * contradicted-shaped verdict carrying the claim's
+ * hallucination_reason as the evidence text, stuffs the verdict
+ * cache + storage, then asks the renderer to draw the underline +
+ * host. The card opens in the same "Hallucination" verified state
+ * a real Brave-confirmed contradiction would.
+ */
+function renderArtifactClaims(
+  responseNode: Element,
+  artifacts: VerifiableClaim[],
+  conversationId: string,
+  responseHash: string,
+): void {
+  for (const claim of artifacts) {
+    const synth = synthesizeArtifactVerdict(claim)
+    if (!synth) {
+      log('artifact missing analysis_id/claim_index — skipping', claim)
+      continue
+    }
+    const aid = claim.analysis_id!
+    const idx = claim.claim_index!
+    setClaimVerdict(aid, idx, synth)
+    void saveVerdict(conversationId, responseHash, idx, synth)
+    recordVerdict('contradicted', { hallucinationSignal: 'high' })
+    if (!document.body.contains(responseNode)) {
+      log(`response node detached — skipping artifact render claim_index=${idx}`)
+      continue
+    }
+    rendererShow(responseNode, [], [claim])
   }
 }
 

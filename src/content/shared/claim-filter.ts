@@ -30,6 +30,60 @@ export function filterClaimsForVerify(
 }
 
 /**
+ * Split candidates into artifact-claims (rendered immediately with a
+ * synthesized verdict) and factual-claims (sent through VERIFY_CLAIM).
+ *
+ * Artifacts are non-factual generation glitches — language switches,
+ * repetition, malformed output. Brave can't corroborate or refute a
+ * glitch, so the verify call is wasted quota. Backend ships them
+ * with hallucination_signal: "high" already, so they pass the
+ * filterClaimsForVerify gate; this partition runs after that.
+ */
+export function partitionCandidates(
+  candidates: VerifiableClaim[],
+): { artifacts: VerifiableClaim[]; factual: VerifiableClaim[] } {
+  const artifacts: VerifiableClaim[] = []
+  const factual: VerifiableClaim[] = []
+  for (const c of candidates) {
+    if (c?.claim_type === 'generation_artifact') {
+      artifacts.push(c)
+    } else if (c) {
+      factual.push(c)
+    }
+  }
+  return { artifacts, factual }
+}
+
+/**
+ * Build a verdict-shaped payload for a generation artifact so the
+ * existing render path treats it identically to a verified-
+ * contradicted factual claim. evidence_summary is sourced from
+ * hallucination_reason; source_urls is empty (no Brave call); the
+ * verification_id is a deterministic synth tag so analytics can
+ * tell artifacts apart from real verifications later.
+ *
+ * Returns null when the claim doesn't have the IDs needed to be
+ * render-eligible — caller should skip in that case.
+ */
+export function synthesizeArtifactVerdict(
+  claim: VerifiableClaim,
+): VerifyClaimResponse | null {
+  if (claim.claim_type !== 'generation_artifact') return null
+  if (
+    typeof claim.analysis_id !== 'string' ||
+    typeof claim.claim_index !== 'number'
+  ) {
+    return null
+  }
+  return {
+    verdict: 'contradicted',
+    evidence_summary: claim.hallucination_reason ?? '',
+    source_urls: [],
+    verification_id: `artifact-${claim.analysis_id}-${claim.claim_index}`,
+  }
+}
+
+/**
  * Decide whether a verify response should produce visible UI.
  *
  * Only `verdict === 'contradicted'` renders. Everything else (other

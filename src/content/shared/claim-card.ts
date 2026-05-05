@@ -87,7 +87,11 @@ function verdictBadgeClass(verdict: Verdict): string {
 function verdictLabel(verdict: Verdict): string {
   switch (verdict) {
     case 'confirmed': return '✓ Confirmed'
-    case 'contradicted': return 'Verified false'
+    // Single user-facing label for any AI mistake — verified-false
+    // facts AND generation_artifact glitches both surface here. The
+    // user's mental model is "this is a hallucination," regardless
+    // of which of the two backend paths produced it.
+    case 'contradicted': return 'Hallucination'
     case 'inconclusive': return '? Inconclusive'
     case 'error': return '! Error'
   }

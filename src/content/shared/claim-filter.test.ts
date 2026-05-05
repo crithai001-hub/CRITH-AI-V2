@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { classifyVerifyResult, filterClaimsForVerify } from './claim-filter'
+import {
+  classifyVerifyResult,
+  filterClaimsForVerify,
+  partitionCandidates,
+  synthesizeArtifactVerdict,
+} from './claim-filter'
 import type { VerifiableClaim, VerifyClaimResponse } from '../../shared/types'
 
 const baseClaim = (overrides: Partial<VerifiableClaim>): VerifiableClaim => ({
@@ -74,6 +79,106 @@ describe('filterClaimsForVerify (hallucination_signal gate)', () => {
       baseClaim({ hallucination_signal: 'high', claim: 'kept' }),
     ]
     expect(filterClaimsForVerify(claims).map((c) => c.claim)).toEqual(['kept'])
+  })
+})
+
+describe('partitionCandidates (artifact split)', () => {
+  it('routes generation_artifact claims to artifacts, others to factual', () => {
+    const candidates: VerifiableClaim[] = [
+      baseClaim({ claim: 'A', claim_type: 'generation_artifact', hallucination_signal: 'high' }),
+      baseClaim({ claim: 'B', claim_type: 'statistic', hallucination_signal: 'high' }),
+      baseClaim({ claim: 'C', claim_type: 'generation_artifact', hallucination_signal: 'high' }),
+      baseClaim({ claim: 'D', claim_type: 'citation', hallucination_signal: 'medium' }),
+    ]
+    const { artifacts, factual } = partitionCandidates(candidates)
+    expect(artifacts.map((c) => c.claim)).toEqual(['A', 'C'])
+    expect(factual.map((c) => c.claim)).toEqual(['B', 'D'])
+  })
+
+  it('returns empty arrays for empty input', () => {
+    const r = partitionCandidates([])
+    expect(r.artifacts).toEqual([])
+    expect(r.factual).toEqual([])
+  })
+
+  it('survives null entries', () => {
+    const candidates = [
+      null as unknown as VerifiableClaim,
+      baseClaim({ claim: 'kept', claim_type: 'generation_artifact', hallucination_signal: 'high' }),
+    ]
+    const { artifacts, factual } = partitionCandidates(candidates)
+    expect(artifacts).toHaveLength(1)
+    expect(factual).toHaveLength(0)
+  })
+})
+
+describe('synthesizeArtifactVerdict', () => {
+  it('returns a contradicted verdict for a properly-stamped artifact', () => {
+    const claim = baseClaim({
+      claim_type: 'generation_artifact',
+      hallucination_signal: 'high',
+      hallucination_reason: 'random French token inserted in English response',
+      analysis_id: 'an-1',
+      claim_index: 2,
+    })
+    const v = synthesizeArtifactVerdict(claim)
+    expect(v).not.toBeNull()
+    expect(v).toEqual({
+      verdict: 'contradicted',
+      evidence_summary: 'random French token inserted in English response',
+      source_urls: [],
+      verification_id: 'artifact-an-1-2',
+    })
+  })
+
+  it('returns null for non-artifact claim types', () => {
+    expect(
+      synthesizeArtifactVerdict(
+        baseClaim({ claim_type: 'statistic', analysis_id: 'an-1', claim_index: 0 }),
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when analysis_id or claim_index missing', () => {
+    expect(
+      synthesizeArtifactVerdict(
+        baseClaim({ claim_type: 'generation_artifact' }),
+      ),
+    ).toBeNull()
+    expect(
+      synthesizeArtifactVerdict(
+        baseClaim({ claim_type: 'generation_artifact', analysis_id: 'an-1' }),
+      ),
+    ).toBeNull()
+    expect(
+      synthesizeArtifactVerdict(
+        baseClaim({ claim_type: 'generation_artifact', claim_index: 0 }),
+      ),
+    ).toBeNull()
+  })
+
+  it('uses empty string as evidence when hallucination_reason missing', () => {
+    const v = synthesizeArtifactVerdict(
+      baseClaim({
+        claim_type: 'generation_artifact',
+        analysis_id: 'an-1',
+        claim_index: 0,
+      }),
+    )
+    expect(v?.evidence_summary).toBe('')
+  })
+
+  it('produced shape passes classifyVerifyResult as render', () => {
+    const claim = baseClaim({
+      claim_type: 'generation_artifact',
+      hallucination_reason: 'truncated mid-word',
+      analysis_id: 'an-1',
+      claim_index: 0,
+    })
+    const v = synthesizeArtifactVerdict(claim)
+    expect(v).not.toBeNull()
+    const out = classifyVerifyResult(v)
+    expect(out.kind).toBe('render')
   })
 })
 

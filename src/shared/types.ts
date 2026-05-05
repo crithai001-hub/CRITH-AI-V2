@@ -157,6 +157,15 @@ export type ClaimType =
   | 'current_state'
   | 'quote'
   | 'technical_fact'
+  /**
+   * Non-factual generation glitches (random language switches mid-
+   * response, repetition, malformed markdown, encoding errors,
+   * truncation). Backend always ships these with
+   * hallucination_signal: "high" and a hallucination_reason.
+   * Extension renders them as if they were a contradicted verdict
+   * but never fires VERIFY_CLAIM — Brave can't confirm a glitch.
+   */
+  | 'generation_artifact'
 
 export type Risk = 'high' | 'medium' | 'low'
 
