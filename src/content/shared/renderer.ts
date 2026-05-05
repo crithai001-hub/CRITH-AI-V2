@@ -26,11 +26,20 @@ function log(...args: unknown[]): void { if (DEBUG) console.log(LOG_PREFIX, ...a
 function warn(...args: unknown[]): void { if (DEBUG) console.warn(LOG_PREFIX, ...args) }
 
 const NARROW_VIEWPORT_PX = 768
-// Vertical offset between stacked logos for one response carrying
-// multiple provocations. Bumped from 28 to 36 for the larger 24px
-// logo + the 8px hit-area extension so adjacent hosts don't overlap
-// each other's hover zones.
-const STACK_SPACING_PX = 36
+// Vertical offset between stacked logos. The host's visible footprint
+// is logo (24x24) + dot (extending 8px above-right with white ring +
+// shadow) ≈ 28-30px tall. 44px spacing leaves a comfortable 14px gap
+// between stacked logos, plus enough margin for the hit-area ::before
+// pseudo not to butt up against the next logo's clickable region.
+const STACK_SPACING_PX = 44
+// Used when bumping a host past an existing collision (different
+// responseNode at the same x). Match STACK_SPACING_PX so anti-collision
+// shifts read as part of the same vertical rhythm as same-response
+// stacking.
+const COLLISION_BUMP_PX = STACK_SPACING_PX
+// Cap collision-avoidance loop so a pathological page can't pin
+// the main thread.
+const MAX_COLLISION_BUMPS = 20
 
 const SHADOW_STYLES = `
   :host { all: initial; }
@@ -1071,13 +1080,55 @@ function positionHost(host: HTMLElement, span: Element, responseNode: Element): 
   const r = span.getBoundingClientRect()
   const stackIndex = parseInt(host.getAttribute('data-stack-index') ?? '0', 10) || 0
   const stackY = stackIndex * STACK_SPACING_PX
+
+  let x: number
+  let baseY: number
   if (window.innerWidth < NARROW_VIEWPORT_PX) {
-    host.style.transform = `translate(${Math.max(8, r.left)}px, ${r.bottom + 6 + stackY}px)`
+    x = Math.max(8, r.left)
+    baseY = r.bottom + 6 + stackY
   } else {
     const responseRight = responseNode.getBoundingClientRect().right
-    const x = Math.min(responseRight + 6, window.innerWidth - 28)
-    host.style.transform = `translate(${x}px, ${r.top + stackY}px)`
+    x = Math.min(responseRight + 6, window.innerWidth - 28)
+    baseY = r.top + stackY
   }
+
+  // Collision avoidance across responseNodes. Same-response stacking
+  // is handled by stackIndex; that's deterministic from the per-node
+  // counter. But two adjacent responses can each render stack_index=0
+  // hosts whose anchor.tops happen to put them at the same screen y
+  // (different responseNodes don't share a counter). Walk every
+  // existing host and bump our y down past any whose rect overlaps
+  // ours at the same x.
+  let y = baseY
+  for (let i = 0; i < MAX_COLLISION_BUMPS; i++) {
+    if (!collidesWithOtherHost(host, x, y)) break
+    y += COLLISION_BUMP_PX
+  }
+
+  host.style.transform = `translate(${x}px, ${y}px)`
+}
+
+/**
+ * True if any other crith-prov-host in the document has a bounding
+ * rect that overlaps the candidate (x, y) position by both axes.
+ * "Same x" tolerance is loose (32px) to catch hosts that are at
+ * roughly the same column even if pixel-aligned slightly differently.
+ */
+function collidesWithOtherHost(self: HTMLElement, x: number, y: number): boolean {
+  const HOST_HEIGHT = 32  // logo 24px + dot lift 8px
+  const X_TOLERANCE = 32
+  const all = document.querySelectorAll('crith-prov-host')
+  for (const other of all) {
+    if (other === self) continue
+    const r = (other as HTMLElement).getBoundingClientRect()
+    // Skip if other host is currently invisible (zero-size — happens
+    // briefly during reposition cascades).
+    if (r.width === 0 || r.height === 0) continue
+    if (Math.abs(r.left - x) > X_TOLERANCE) continue
+    // Vertical overlap: candidate [y, y+HOST_HEIGHT] vs other [r.top, r.bottom]
+    if (r.top < y + HOST_HEIGHT && r.bottom > y) return true
+  }
+  return false
 }
 
 function attachReposition(host: HTMLElement, span: Element, responseNode: Element): void {
