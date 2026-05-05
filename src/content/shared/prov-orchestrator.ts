@@ -17,7 +17,7 @@
 import * as observer from './observer'
 import { show as rendererShow } from './renderer'
 import { setCardAdapter } from './card'
-import { setClaimCardAdapter } from './claim-card'
+import { setClaimCardAdapter, setClaimVerdict } from './claim-card'
 import { adapter as chatgptAdapter } from '../platforms/chatgpt'
 import { adapter as claudeAdapter } from '../platforms/claude'
 import { adapter as geminiAdapter } from '../platforms/gemini'
@@ -35,6 +35,7 @@ import type {
   Provocation,
   Validation,
   VerifiableClaim,
+  VerifyClaimResponse,
 } from '../../shared/types'
 
 const DEBUG = true
@@ -287,25 +288,90 @@ async function handleResponseComplete(params: {
       }))
     : []
 
+  // Render validations synchronously — they're already finalized by
+  // analyze and don't depend on any further round-trip.
+  rendererShow(node, enriched)
+
+  // Verifiable claims: kick off VERIFY_CLAIM in parallel for each
+  // detected claim. The underline is a "this part has been disproven"
+  // signal, not a "you might want to check this" signal — so we only
+  // render the host once we know the verdict is "contradicted". Other
+  // verdicts (confirmed / inconclusive / error) leave no visible trace.
   if (enrichedClaims.length > 0) {
     const riskCounts: Record<string, number> = {}
     for (const c of enrichedClaims) {
       riskCounts[c.risk] = (riskCounts[c.risk] ?? 0) + 1
     }
     log(
-      `claims=${enrichedClaims.length} risk=${JSON.stringify(riskCounts)} ` +
-        'preview=' +
-        JSON.stringify(
-          enrichedClaims.map((c) => ({
-            type: c.claim_type,
-            risk: c.risk,
-            anchor: c.anchored_to.slice(0, 60),
-          })),
-        ),
+      `claims=${enrichedClaims.length} risk=${JSON.stringify(riskCounts)} — ` +
+        'auto-firing VERIFY_CLAIM for each',
     )
+    void verifyAndRenderContradicted(node, enrichedClaims)
   }
+}
 
-  rendererShow(node, enriched, enrichedClaims)
+/**
+ * Fire VERIFY_CLAIM in parallel for every claim detected on this
+ * response. As each verdict resolves, render the underline + host
+ * iff the verdict is "contradicted" — pre-populating the claim-card
+ * verdict cache so the card opens directly in the verified state on
+ * first hover.
+ *
+ * Errors and non-contradicted verdicts produce no visible UI. The
+ * VERIFY_CLAIM message route in the SW already logs failures, so
+ * we silently consume them here.
+ */
+async function verifyAndRenderContradicted(
+  responseNode: Element,
+  claims: VerifiableClaim[],
+): Promise<void> {
+  await Promise.all(
+    claims.map(async (claim) => {
+      const aid = claim.analysis_id
+      const idx = claim.claim_index
+      if (typeof aid !== 'string' || typeof idx !== 'number') {
+        log('claim missing analysis_id or claim_index — skipping verify', claim)
+        return
+      }
+      let verdict: VerifyClaimResponse | ApiError
+      try {
+        verdict = (await chrome.runtime.sendMessage({
+          type: 'VERIFY_CLAIM',
+          payload: { analysis_id: aid, claim_index: idx },
+        })) as VerifyClaimResponse | ApiError
+      } catch (err) {
+        log(`VERIFY_CLAIM sendMessage failed for claim_index=${idx}:`, err)
+        return
+      }
+      if (isApiError(verdict)) {
+        log(`VERIFY_CLAIM error claim_index=${idx} kind=${verdict.kind}`)
+        return
+      }
+      if (
+        !verdict ||
+        typeof verdict.verdict !== 'string' ||
+        !Array.isArray(verdict.source_urls)
+      ) {
+        log(`VERIFY_CLAIM unexpected shape claim_index=${idx}`, verdict)
+        return
+      }
+      log(
+        `VERIFY_CLAIM resolved claim_index=${idx} verdict=${verdict.verdict} ` +
+          `sources=${verdict.source_urls.length}`,
+      )
+      if (verdict.verdict !== 'contradicted') return
+
+      // Pre-stuff the verdict so the claim card opens in the verified
+      // state without firing a second VERIFY_CLAIM. Then render the
+      // underline + host for this single claim.
+      setClaimVerdict(aid, idx, verdict)
+      if (!document.body.contains(responseNode)) {
+        log(`response node detached before verdict — skipping render claim_index=${idx}`)
+        return
+      }
+      rendererShow(responseNode, [], [claim])
+    }),
+  )
 }
 
 // ── SPA URL-change watcher ───────────────────────────────────

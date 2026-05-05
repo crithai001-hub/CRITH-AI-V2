@@ -61,6 +61,24 @@ function cacheKey(analysisId: string, claimIndex: number): string {
   return `${analysisId}::${claimIndex}`
 }
 
+/**
+ * Pre-populate the verdict cache from outside this module.
+ *
+ * The orchestrator now auto-fires VERIFY_CLAIM for every detected
+ * claim in the background, then renders the underline + host only
+ * for claims whose verdict came back "contradicted". Stuffing the
+ * verdict into the cache before render means the card opens
+ * directly in the verified state on first hover — no second
+ * network round-trip, no Verify button to click.
+ */
+export function setClaimVerdict(
+  analysisId: string,
+  claimIndex: number,
+  verdict: VerifyClaimResponse,
+): void {
+  verdictCache.set(cacheKey(analysisId, claimIndex), verdict)
+}
+
 // ── Visual mapping helpers ───────────────────────────────────
 
 function verdictBadgeClass(verdict: Verdict): string {

@@ -468,11 +468,33 @@ function isHighSignalLens(lens: Lens): boolean {
 }
 
 /**
+ * Per-responseNode logo stack counter. Render functions are now called
+ * incrementally (validations sync at analyze time; claims async after
+ * VERIFY_CLAIM resolves contradicted), so we can't pass a single
+ * stackIndex through one show() call. The WeakMap lets each render
+ * pull the next free slot for whichever responseNode it targets.
+ */
+const stackCounters = new WeakMap<Element, number>()
+
+function nextStackIndex(node: Element): number {
+  return stackCounters.get(node) ?? 0
+}
+
+function bumpStackIndex(node: Element): void {
+  stackCounters.set(node, (stackCounters.get(node) ?? 0) + 1)
+}
+
+/**
  * Render validations + verifiable claims against a single response node.
- * Validations come first, then claims; both share a single stack-index
- * counter so logos stack cleanly without overlap.
+ * May be called multiple times on the same responseNode — claims arrive
+ * asynchronously after their VERIFY_CLAIM verdict is known to be
+ * "contradicted" — so the stack counter is kept on a WeakMap rather
+ * than re-derived from local state each call.
  *
- * @param claims - optional; defaults to empty array (back-compat)
+ * @param claims - only contradicted-and-verified claims should be passed.
+ *   The orchestrator pre-populates the verdict cache via
+ *   setClaimVerdict() before this call so the card opens directly in
+ *   the verified state.
  */
 export function show(
   responseNode: Element,
@@ -483,16 +505,11 @@ export function show(
   const safeClaims = Array.isArray(claims) ? claims : []
   if (safeValidations.length === 0 && safeClaims.length === 0) return
 
-  let stackIndex = 0
   for (const validation of safeValidations) {
-    if (renderValidationItem(responseNode, validation, stackIndex)) {
-      stackIndex++
-    }
+    renderValidationItem(responseNode, validation)
   }
   for (const claim of safeClaims) {
-    if (renderClaimItem(responseNode, claim, stackIndex)) {
-      stackIndex++
-    }
+    renderClaimItem(responseNode, claim)
   }
 }
 
@@ -503,7 +520,6 @@ export function show(
 function renderValidationItem(
   responseNode: Element,
   validation: Validation,
-  stackIndex: number,
 ): boolean {
   if (!validation) return false
   const provocationId = validation.provocation_id
@@ -511,7 +527,7 @@ function renderValidationItem(
 
   try {
     const sel = `crith-prov-host[data-prov-id="${CSS.escape(provocationId)}"]`
-    if (document.querySelector(sel)) return true  // counts toward stack
+    if (document.querySelector(sel)) return true
   } catch { /* noop */ }
 
   const target = validation.anchored_to || ''
@@ -527,12 +543,14 @@ function renderValidationItem(
   const firstSpan = spans[0]
   if (!firstSpan) return false
 
+  const stackIndex = nextStackIndex(responseNode)
   const host = createHost(provocationId, validation, spans)
   if (target) host.setAttribute('data-target', target)
   host.setAttribute('data-stack-index', String(stackIndex))
   document.body.appendChild(host)
   positionHost(host, firstSpan, responseNode)
   attachReposition(host, firstSpan, responseNode)
+  bumpStackIndex(responseNode)
 
   logHostPlaced(host, firstSpan, 'validation')
 
@@ -548,12 +566,14 @@ function renderValidationItem(
 
 /**
  * Render one verifiable claim. Same lifecycle as a validation but uses
- * the amber color scheme + claim-specific card markup.
+ * the amber color scheme + claim-specific card markup. Only called for
+ * claims whose verdict has resolved to "contradicted" — the underline is
+ * a "this part has been disproven" flag, not a "you might want to check
+ * this" flag.
  */
 function renderClaimItem(
   responseNode: Element,
   claim: VerifiableClaim,
-  stackIndex: number,
 ): boolean {
   if (!claim) return false
   if (
@@ -585,12 +605,14 @@ function renderClaimItem(
   const firstSpan = spans[0]
   if (!firstSpan) return false
 
+  const stackIndex = nextStackIndex(responseNode)
   const host = createClaimHost(claimDomId, claim, spans)
   if (target) host.setAttribute('data-target', target)
   host.setAttribute('data-stack-index', String(stackIndex))
   document.body.appendChild(host)
   positionHost(host, firstSpan, responseNode)
   attachReposition(host, firstSpan, responseNode)
+  bumpStackIndex(responseNode)
 
   logHostPlaced(host, firstSpan, 'claim')
 
