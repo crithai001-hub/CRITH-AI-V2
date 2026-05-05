@@ -17,6 +17,7 @@
 import * as observer from './observer'
 import { show as rendererShow } from './renderer'
 import { setCardAdapter } from './card'
+import { setClaimCardAdapter } from './claim-card'
 import { adapter as chatgptAdapter } from '../platforms/chatgpt'
 import { adapter as claudeAdapter } from '../platforms/claude'
 import { adapter as geminiAdapter } from '../platforms/gemini'
@@ -33,6 +34,7 @@ import type {
   PlatformAdapter,
   Provocation,
   Validation,
+  VerifiableClaim,
 } from '../../shared/types'
 
 const DEBUG = true
@@ -271,7 +273,39 @@ async function handleResponseComplete(params: {
       anchor_preview: v.anchored_to.slice(0, 80),
     }))),
   )
-  rendererShow(node, enriched)
+
+  // Verifiable claims (fact-check candidates) from /api/analyze-response.
+  // Backend may omit the field entirely on older deployments; treat as
+  // empty in that case. Each claim gets analysis_id + claim_index
+  // stamped so claim-card.ts can fire VERIFY_CLAIM and LOG_EVENT.
+  const rawClaims = (result as { verifiable_claims?: VerifiableClaim[] }).verifiable_claims
+  const enrichedClaims: VerifiableClaim[] = Array.isArray(rawClaims)
+    ? rawClaims.map((c, i) => ({
+        ...c,
+        analysis_id: result.analysis_id,
+        claim_index: i,
+      }))
+    : []
+
+  if (enrichedClaims.length > 0) {
+    const riskCounts: Record<string, number> = {}
+    for (const c of enrichedClaims) {
+      riskCounts[c.risk] = (riskCounts[c.risk] ?? 0) + 1
+    }
+    log(
+      `claims=${enrichedClaims.length} risk=${JSON.stringify(riskCounts)} ` +
+        'preview=' +
+        JSON.stringify(
+          enrichedClaims.map((c) => ({
+            type: c.claim_type,
+            risk: c.risk,
+            anchor: c.anchored_to.slice(0, 60),
+          })),
+        ),
+    )
+  }
+
+  rendererShow(node, enriched, enrichedClaims)
 }
 
 // ── SPA URL-change watcher ───────────────────────────────────
@@ -299,8 +333,11 @@ if (adapter) {
   log(`booting on ${location.hostname} | adapter="${adapter.name}" | color=${color ?? '(default)'}`)
 
   // Hand the adapter to card.ts so its Ask AI button knows where to
-  // route the follow-up prompt.
+  // route the follow-up prompt. Claim card uses the same adapter ref
+  // (for symmetry — currently unused there, but reserved for a
+  // future "ask AI to elaborate on the verdict" affordance).
   setCardAdapter(adapter)
+  setClaimCardAdapter(adapter)
 
   observer.start(adapter, handleResponseComplete)
 

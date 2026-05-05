@@ -3,6 +3,7 @@ import {
   analyzeResponse,
   explainProvocation,
   logEvent,
+  verifyClaim,
   isApiError,
 } from '../shared/api-client'
 import { getAuth, getUserEmail } from '../shared/storage'
@@ -136,6 +137,28 @@ async function handleMessage(message: IncomingMessage): Promise<unknown> {
       } else {
         console.log(
           `${LOG_PREFIX} EXPLAIN_PROVOCATION ok len=${result.explanation.length}`,
+        )
+      }
+      return result
+    }
+
+    case 'VERIFY_CLAIM': {
+      console.log(
+        `${LOG_PREFIX} VERIFY_CLAIM analysis_id=${message.payload.analysis_id} claim_index=${message.payload.claim_index}`,
+      )
+      const result = await verifyClaim(
+        message.payload,
+        getAccessTokenWithRefresh,
+      )
+      if (isApiError(result)) {
+        if (result.kind === 'AUTH_REQUIRED' || result.kind === 'QUOTA_EXCEEDED') {
+          console.warn(`${LOG_PREFIX} VERIFY_CLAIM error:`, result)
+        } else {
+          console.error(`${LOG_PREFIX} VERIFY_CLAIM error:`, result)
+        }
+      } else {
+        console.log(
+          `${LOG_PREFIX} VERIFY_CLAIM ok verdict=${result.verdict} sources=${result.source_urls.length} verification_id=${result.verification_id}`,
         )
       }
       return result

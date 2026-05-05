@@ -101,6 +101,10 @@ export type AnalyzeResponseSuccess = {
   validations?: Validation[]
   /** Legacy pre-v14 array. Used as a fallback for older deploys. */
   provocations?: Provocation[]
+  /** Fact-check candidates surfaced by the claim-extractor. */
+  verifiable_claims?: VerifiableClaim[]
+  /** Provenance for the system prompts that produced this response. */
+  prompt_versions?: PromptVersions
   analysis_id: string
 }
 
@@ -123,6 +127,7 @@ export type EventType =
   | 'useful'
   | 'not_useful'
   | 'asked_ai'
+  | 'verified'
 
 export type EventRequest = {
   analysis_id: string
@@ -139,6 +144,54 @@ export type ExplainRequest = {
 
 export type ExplainResponse = {
   explanation: string
+}
+
+// ── Verifiable claims (fact-check pipeline) ──────────────────
+
+export type ClaimType =
+  | 'statistic'
+  | 'citation'
+  | 'person_or_role'
+  | 'date'
+  | 'product_or_pricing'
+  | 'current_state'
+  | 'quote'
+  | 'technical_fact'
+
+export type Risk = 'high' | 'medium' | 'low'
+
+export type Verdict = 'confirmed' | 'contradicted' | 'inconclusive' | 'error'
+
+export type VerifiableClaim = {
+  /** Searchable, display-ready form of the claim. */
+  claim: string
+  /** Verbatim 30-80 char substring of the AI response (renderer underlines this). */
+  anchored_to: string
+  claim_type: ClaimType
+  /** One sentence — shown in the card body. */
+  why_verify: string
+  risk: Risk
+  /** Stamped by the orchestrator from AnalyzeResponseSuccess.analysis_id. */
+  analysis_id?: string
+  /** Index within verifiable_claims[]. Stamped by orchestrator. */
+  claim_index?: number
+}
+
+export type PromptVersions = {
+  validator: string
+  claim_extractor: string
+}
+
+export type VerifyClaimRequest = {
+  analysis_id: string
+  claim_index: number
+}
+
+export type VerifyClaimResponse = {
+  verdict: Verdict
+  evidence_summary: string
+  source_urls: string[]
+  verification_id: string
 }
 
 // ── API errors ───────────────────────────────────────────────
@@ -164,6 +217,10 @@ export type ExplainProvocationMessage = {
   type: 'EXPLAIN_PROVOCATION'
   payload: ExplainRequest
 }
+export type VerifyClaimMessage = {
+  type: 'VERIFY_CLAIM'
+  payload: VerifyClaimRequest
+}
 /** Removed before launch — manual end-to-end pipeline test. */
 export type DebugTestBackendMessage = { type: 'DEBUG_TEST_BACKEND' }
 
@@ -172,6 +229,7 @@ export type IncomingMessage =
   | LogEventMessage
   | AuthStatusMessage
   | ExplainProvocationMessage
+  | VerifyClaimMessage
   | DebugTestBackendMessage
 
 export type AuthStatusResponse =

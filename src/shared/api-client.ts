@@ -6,6 +6,8 @@ import type {
   EventRequest,
   ExplainRequest,
   ExplainResponse,
+  VerifyClaimRequest,
+  VerifyClaimResponse,
 } from './types'
 
 const MOCK_EXPLANATION =
@@ -149,6 +151,25 @@ export async function explainProvocation(
   }
   return callBackend<ExplainResponse>(
     '/api/explain-provocation',
+    payload,
+    getAccessToken,
+  )
+}
+
+/**
+ * Verify a single claim against external sources. Backend runs
+ * Brave-Search → LLM verifier and returns a verdict with
+ * evidence_summary + source_urls.
+ *
+ * Quota: shares the monthly counter with /api/analyze-response.
+ * 429 returns QUOTA_EXCEEDED with limit/used (best-effort parsed).
+ */
+export async function verifyClaim(
+  payload: VerifyClaimRequest,
+  getAccessToken: GetAccessToken,
+): Promise<VerifyClaimResponse | ApiError> {
+  return callBackend<VerifyClaimResponse>(
+    '/api/verify-claim',
     payload,
     getAccessToken,
   )
