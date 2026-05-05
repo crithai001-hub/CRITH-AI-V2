@@ -246,7 +246,9 @@ if (
         }))
       dump['query-shaped candidates'] = querySamples
 
-      console.log('[Crith V2 PROV][deepseek diag]', dump)
+      console.log(
+        '[Crith V2 PROV][deepseek diag]\n' + JSON.stringify(dump, null, 2),
+      )
     } catch (err) {
       console.warn('[Crith V2 PROV][deepseek diag] dump failed', err)
     }

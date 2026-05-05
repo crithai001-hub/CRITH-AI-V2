@@ -238,7 +238,9 @@ if (DEBUG_DIAGNOSTIC && typeof location !== 'undefined' && location.hostname.inc
         }))
       dump['query-shaped candidates'] = querySamples
 
-      console.log('[Crith V2 PROV][grok diag]', dump)
+      console.log(
+        '[Crith V2 PROV][grok diag]\n' + JSON.stringify(dump, null, 2),
+      )
     } catch (err) {
       console.warn('[Crith V2 PROV][grok diag] dump failed', err)
     }

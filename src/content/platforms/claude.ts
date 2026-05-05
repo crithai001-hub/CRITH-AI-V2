@@ -33,6 +33,13 @@ const SEL = {
     'div[data-testid*="assistant-message"]',
     'div[role="article"][data-test-render-count]',
     '[data-message-author-role="assistant"]',
+    // Bare data-test-render-count is on every message wrapper —
+    // matches both user and assistant. The promptNodeForResponse
+    // walker excludes self / earlier matches, so this is safe.
+    'div[data-test-render-count]',
+    // Pre-2025 Claude wrapped assistant content in this; some A/B
+    // states still ship it.
+    'div[data-is-streaming]',
   ],
   promptNodeForResponse: [
     'div[data-testid="user-message"]',
@@ -238,7 +245,13 @@ if (
         }))
       dump['query-shaped candidates'] = querySamples
 
-      console.log('[Crith V2 PROV][claude diag]', dump)
+      // Print as a JSON string so the full contents are visible in
+      // the log line itself — Chrome's console truncates inline
+      // Object representations and the user has to expand them
+      // manually otherwise. JSON output is copy-pasteable in one shot.
+      console.log(
+        '[Crith V2 PROV][claude diag]\n' + JSON.stringify(dump, null, 2),
+      )
     } catch (err) {
       console.warn('[Crith V2 PROV][claude diag] dump failed', err)
     }

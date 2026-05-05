@@ -234,7 +234,9 @@ if (DEBUG_DIAGNOSTIC && typeof location !== 'undefined' && location.hostname.inc
         }))
       dump['query-shaped candidates'] = queryCandidates
 
-      console.log('[Crith V2 PROV][perplexity diag]', dump)
+      console.log(
+        '[Crith V2 PROV][perplexity diag]\n' + JSON.stringify(dump, null, 2),
+      )
     } catch (err) {
       console.warn('[Crith V2 PROV][perplexity diag] dump failed', err)
     }
