@@ -186,6 +186,36 @@ async function handleResponseComplete(params: {
     return
   }
 
+  // Cache short-circuit. If an analysis is already saved for this
+  // exact response (by hash), don't re-fire ANALYZE — that's what
+  // happens on a page refresh: the MutationObserver detects all the
+  // existing AI responses and would otherwise re-run analyze on each
+  // (burning quota AND producing duplicate hosts because the new
+  // analysis_id wouldn't dedup against the cached prov_ids).
+  //
+  // Instead, drive a single rehydrateOneNode pass which paints the
+  // cached validations + claim hosts directly. The bg rehydrate
+  // scans may not have covered this node yet (observer can fire
+  // before the 400ms scan), so this is the eager path.
+  const responseHashEarly = hashResponse(response)
+  const cachedEarly = await getStoredAnalysis(sessionId, responseHashEarly)
+  if (cachedEarly) {
+    log(
+      `cache-hit on observer fire — skipping ANALYZE, rehydrating instead. ` +
+        `hash=${responseHashEarly} validations=${cachedEarly.validations.length} ` +
+        `claims=${cachedEarly.verifiable_claims.length} ` +
+        `verdicts=${Object.keys(cachedEarly.verdicts).length}`,
+    )
+    if (adapter) {
+      try {
+        await rehydrateOneNode(node, adapter)
+      } catch (err) {
+        log('rehydrateOneNode (eager) failed:', err)
+      }
+    }
+    return
+  }
+
   // Synthetic message_id. Platforms expose per-message IDs differently
   // (data-message-id on ChatGPT, render-count on Claude, etc.); the
   // adapter contract doesn't surface it, so we derive a stable-ish key
@@ -590,7 +620,7 @@ async function verifyAndRenderContradicted(
 // idempotent because rendererShow checks for an existing host
 // keyed on provocation_id / claim_dom_id and returns early on dup.
 
-const REHYDRATE_DELAYS_MS = [400, 1500, 3500]
+const REHYDRATE_DELAYS_MS = [400, 1500, 3500, 7000]
 
 const rehydratedNodes = new WeakSet<Element>()
 

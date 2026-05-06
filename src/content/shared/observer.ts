@@ -128,6 +128,22 @@ function attachContainer(container: Element): void {
     }
   })
   containerObserver.observe(container, { childList: true, subtree: true })
+
+  // Initial scan over response nodes that are ALREADY in the DOM at
+  // attach time. On page refresh, the chat history is part of the
+  // initial hydration — the MutationObserver only fires for NEW
+  // additions, so it would otherwise miss every existing reply.
+  // attachToResponse → text-stability poll → fireNow → orchestrator
+  // sees a cache hit (no re-analyze) and triggers rehydrate paint.
+  if (adapter) {
+    try {
+      const existing = adapter.getAllResponseNodes()
+      log(`initial scan: ${existing.length} existing response node(s) — wiring per-node pollers`)
+      for (const node of existing) attachToResponse(node)
+    } catch (err) {
+      log('initial scan failed:', err)
+    }
+  }
 }
 
 function handleAddedNode(node: Element): void {
