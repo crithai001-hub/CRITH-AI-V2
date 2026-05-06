@@ -25,14 +25,46 @@ const LOG_PREFIX = '[Crith SW]'
 // "currently idle", not "broken").
 console.log(`${LOG_PREFIX} module loaded @ ${new Date().toISOString()}`)
 
+// ── Keep-alive alarm ─────────────────────────────────────────
+//
+// MV3 idles the SW after ~30s of inactivity. That's by design and
+// can't be disabled, but a chrome.alarms tick counts as an event
+// and wakes the SW just like an incoming message would. Setting
+// periodInMinutes: 0.5 wakes the SW every 30 seconds — exactly
+// when it would otherwise be about to idle. Net effect: from the
+// content script's perspective the SW is always reachable on the
+// first sendMessage, with no perceptible cold-start delay.
+//
+// Registered at top level (every wake re-creates idempotently) +
+// onInstalled + onStartup so the alarm self-heals if it's ever
+// cleared (extension update, browser restart, manual remove).
+const KEEP_ALIVE_ALARM = 'crith-keepalive'
+
+function ensureKeepAliveAlarm(): void {
+  chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 })
+}
+
+ensureKeepAliveAlarm()
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KEEP_ALIVE_ALARM) {
+    // The log alone is the activity that keeps the SW alive — no
+    // work needed. Logging timestamp helps verify cadence in SW
+    // DevTools when debugging "is the SW awake?".
+    console.log(`${LOG_PREFIX} keep-alive @ ${new Date().toISOString()}`)
+  }
+})
+
 // ── Lifecycle ────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener((details) => {
   console.log(`${LOG_PREFIX} installed:`, details.reason)
+  ensureKeepAliveAlarm()
 })
 
 chrome.runtime.onStartup.addListener(() => {
   console.log(`${LOG_PREFIX} startup`)
+  ensureKeepAliveAlarm()
 })
 
 // ── Helpers ──────────────────────────────────────────────────
