@@ -27,6 +27,15 @@ function log(...args: unknown[]): void {
 
 const STABILITY_WINDOW_MS = 1500
 const MIN_TEXT_LENGTH = 50
+// Live-fire threshold. When streaming class is currently true AND
+// text has been stable for one STABILITY_WINDOW_MS AND has reached
+// this many characters, fire mid-stream rather than waiting for the
+// streaming class to drop. Higher than MIN_TEXT_LENGTH so we don't
+// burn an analyze on a 50-char fragment that the model is about to
+// keep writing into. Once fired, cleanup() stops the timer — this
+// node won't fire again, so the cost stays at one analyze per
+// response (same as before; flags just appear earlier).
+const MIN_LIVE_CHARS = 300
 // Bumped from 30s → 45s so genuinely long responses (~3000+ chars
 // streamed slowly with reasoning) don't get abandoned before they
 // stabilize. The poller still gives up if the text really never
@@ -119,6 +128,22 @@ function attachContainer(container: Element): void {
     }
   })
   containerObserver.observe(container, { childList: true, subtree: true })
+
+  // Initial scan over response nodes that are ALREADY in the DOM at
+  // attach time. On page refresh, the chat history is part of the
+  // initial hydration — the MutationObserver only fires for NEW
+  // additions, so it would otherwise miss every existing reply.
+  // attachToResponse → text-stability poll → fireNow → orchestrator
+  // sees a cache hit (no re-analyze) and triggers rehydrate paint.
+  if (adapter) {
+    try {
+      const existing = adapter.getAllResponseNodes()
+      log(`initial scan: ${existing.length} existing response node(s) — wiring per-node pollers`)
+      for (const node of existing) attachToResponse(node)
+    } catch (err) {
+      log('initial scan failed:', err)
+    }
+  }
 }
 
 function handleAddedNode(node: Element): void {
@@ -191,7 +216,7 @@ function attachToResponse(node: Element): void {
   let aborted = false
   let timer: ReturnType<typeof setTimeout> | null = null
 
-  const fireNow = (newLength: number, trigger: 'streaming-done' | 'text-stable'): void => {
+  const fireNow = (newLength: number, trigger: 'streaming-done' | 'text-stable' | 'live-stable'): void => {
     if (!adapter) return
     const responseText = adapter.getResponseText(node)
     const promptText = adapter.getPromptForResponse(node)
@@ -229,17 +254,32 @@ function attachToResponse(node: Element): void {
       return
     }
 
-    // Fire condition 2: text-stability fallback. Suppressed when the
-    // streaming class is currently true — that's a mid-stream token
-    // pause, not a real "done". Falls through when streaming class is
-    // false (signal unsupported on this platform OR generation actually
-    // ended without us catching the class transition).
+    // Fire condition 2: text-stability fallback. Used when streaming
+    // class is false (signal unsupported on this platform OR
+    // generation actually ended without us catching the class
+    // transition).
     if (
       !streamingNow &&
       newLength === currentLength &&
       newLength >= MIN_TEXT_LENGTH
     ) {
       fireNow(newLength, 'text-stable')
+      return
+    }
+
+    // Fire condition 3: live mid-stream fire. When streaming is
+    // active but text has paused (model computing the next chunk)
+    // AND we already have meaningful content, fire NOW so the user
+    // sees flags as the response generates rather than waiting for
+    // it to fully complete. cleanup() inside fireNow ensures this
+    // only fires once per node — late content past this point
+    // won't be analyzed, the trade-off for the live feel.
+    if (
+      streamingNow &&
+      newLength === currentLength &&
+      newLength >= MIN_LIVE_CHARS
+    ) {
+      fireNow(newLength, 'live-stable')
       return
     }
 

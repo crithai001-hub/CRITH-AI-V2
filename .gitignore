@@ -13,3 +13,4 @@ manifest-key-private.pem
 *.log
 .idea/
 .vscode/
+vite.config.ts.timestamp-*.mjs

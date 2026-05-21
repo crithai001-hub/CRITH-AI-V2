@@ -8,24 +8,57 @@ import { collectPriorTurns } from '../shared/dom-helpers'
 import { setInputAndSend } from '../shared/send-input'
 import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
+// Grok ships with heavy Tailwind class usage and changes structural
+// class fragments without notice. This list errs on the side of
+// over-inclusion — firstMatch / direct .matches() picks the first
+// hit, the rest are fallbacks for a future redesign. Boot diagnostic
+// at the bottom of this file dumps which selector landed; share it
+// when responses stop being detected.
 const SEL = {
   chatContainer: [
     'main [class*="ChatContainer"]',
     'main [class*="ConversationContainer"]',
     'main [class*="Conversation"]',
+    'main [data-testid*="conversation"]',
     'main',
   ],
   responseNode: [
+    // Verified live (2026-05): both user and assistant bubbles use
+    // .message-bubble, but assistant bubbles render markdown so
+    // they also carry .prose. User bubbles are plain text, no
+    // prose. The combined selector picks the AI side specifically
+    // and doesn't trigger on user messages.
+    'div[class*="message-bubble"][class*="prose"]',
+    // Future-proof attribute-based selectors. xAI may add these
+    // later; if they do, isResponseNode picks them up first.
+    '[data-message-author-role="assistant"]',
+    '[data-message-author="assistant"]',
+    '[data-testid*="grok-message"]',
+    '[data-testid*="assistant-message"]',
+    // Legacy class fragments — kept as fallback for any older
+    // build paths that still ship through.
     '[class*="BotMessage"]',
     '[class*="AssistantMessage"]',
-    '[data-message-author="assistant"]',
     '[class*="response-bubble"]',
+    'article[class*="response"]',
+    // Removed [class*="prose"]: it substring-matches "ProseMirror"
+    // (the tiptap input editor's class) AND every "prose-*"
+    // tailwind utility on every styled child block, producing many
+    // false-positive response nodes per real reply.
   ],
   promptNodeForResponse: [
+    // Same .message-bubble wrapper used for both sides. The
+    // getPromptForResponse walker takes the previous bubble in
+    // sibling/ancestor order — that's the user prompt.
+    'div[class*="message-bubble"]',
     '[class*="UserMessage"]',
     '[class*="HumanMessage"]',
     '[data-message-author="user"]',
+    '[data-message-author-role="user"]',
+    '[data-testid*="user-message"]',
     '[class*="human"]',
+    'div[class*="user-message"]',
+    'div[class*="UserBubble"]',
   ],
 } as const
 
@@ -139,4 +172,77 @@ export const adapter: PlatformAdapter = {
   getPriorTurns,
   isStreaming,
   sendToInput,
+}
+
+// ── One-shot boot diagnostic ─────────────────────────────────
+//
+// Same pattern as the Perplexity adapter. Runs 4 seconds after
+// module load and prints which selectors hit / missed plus
+// samples of "response-shaped" and "user-query-shaped" elements
+// in <main>. Paste the output back if responses stop being
+// detected and we'll patch SEL with the actual class names.
+const DEBUG_DIAGNOSTIC = true
+
+if (DEBUG_DIAGNOSTIC && typeof location !== 'undefined' && location.hostname.includes('grok.com')) {
+  setTimeout(() => {
+    try {
+      const dump: Record<string, unknown> = {
+        url: location.href,
+        chatContainer: !!getChatContainer(),
+        responseNodes: getAllResponseNodes().length,
+      }
+      for (const sel of SEL.responseNode) {
+        dump[`responseSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+      for (const sel of SEL.chatContainer) {
+        dump[`chatSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+      for (const sel of SEL.promptNodeForResponse) {
+        dump[`promptSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+
+      // Sample answer-shaped divs: long text + nested children. The
+      // first 5 ranked by text length usually surface the assistant
+      // message containers regardless of class hashing.
+      const answerSamples = Array.from(document.querySelectorAll('main div'))
+        .filter((el) => {
+          const txt = el.textContent ?? ''
+          return txt.length > 200 && el.children.length > 0
+        })
+        .slice(0, 5)
+        .map((el) => ({
+          tag: el.tagName,
+          classes: (el.className || '').toString().slice(0, 220),
+          dataTestid: el.getAttribute('data-testid'),
+          dataAuthor: el.getAttribute('data-message-author') ||
+                      el.getAttribute('data-message-author-role'),
+          textLen: (el.textContent ?? '').length,
+        }))
+      dump['response-shaped div samples'] = answerSamples
+
+      // Sample user-query-shaped elements: short, often right-
+      // aligned, with author-role data attribute or "user" in class.
+      const querySamples = [
+        ...Array.from(document.querySelectorAll('main [data-message-author-role="user"]')),
+        ...Array.from(document.querySelectorAll('main [data-message-author="user"]')),
+        ...Array.from(document.querySelectorAll('main [class*="user" i]')),
+        ...Array.from(document.querySelectorAll('main [data-testid*="user" i]')),
+      ]
+        .filter((el, i, arr) => arr.indexOf(el) === i)
+        .slice(0, 8)
+        .map((el) => ({
+          tag: el.tagName,
+          classes: (el.className || '').toString().slice(0, 220),
+          dataTestid: el.getAttribute('data-testid'),
+          text: (el.textContent ?? '').trim().slice(0, 80),
+        }))
+      dump['query-shaped candidates'] = querySamples
+
+      console.log(
+        '[Crith V2 PROV][grok diag]\n' + JSON.stringify(dump, null, 2),
+      )
+    } catch (err) {
+      console.warn('[Crith V2 PROV][grok diag] dump failed', err)
+    }
+  }, 4000)
 }

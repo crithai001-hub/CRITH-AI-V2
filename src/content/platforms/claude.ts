@@ -6,21 +6,52 @@ import { collectPriorTurns } from '../shared/dom-helpers'
 import { setInputAndSend } from '../shared/send-input'
 import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
+// Claude's DOM is more stable than Grok/Perplexity but still
+// hashes structural class fragments occasionally. Diagnostic at
+// the bottom dumps which selectors hit — paste it back if
+// detection breaks again. Body is the final-fallback container so
+// the observer always attaches.
 const SEL = {
   chatContainer: [
     'div[class*="ChatScreen"]',
     'main div[class*="conversation"]',
+    'main [data-testid*="conversation"]',
     'main',
+    // Fallbacks for layouts without a <main> wrapper (Claude has
+    // shipped variants without one in some A/B states).
+    'div[data-testid="conversation"]',
+    '[class*="ChatScreen"]',
+    '[class*="conversation-thread"]',
+    'body',
   ],
+  // CRITICAL: every selector in this list MUST be assistant-only.
+  // If a user-message wrapper matches, the orchestrator will run
+  // analyze on the user's prompt as if it were an AI response,
+  // produce flag anchors against prompt text, and underline parts
+  // of what the user typed. That breaks the entire UX premise.
+  // When in doubt, prefer narrow + specific over broad + fallback.
   responseNode: [
     'div[data-test-render-count] div[class*="font-claude-message"]',
     'div[class*="font-claude-message"]',
     'div[class*="claude-message"]',
+    'div[data-testid="claude-message"]',
+    'div[data-testid*="assistant-message"]',
+    'div[role="article"][data-test-render-count]',
+    '[data-message-author-role="assistant"]',
+    // NOTE: bare div[data-test-render-count] was here as a fallback
+    // — REMOVED because data-test-render-count exists on the USER's
+    // bubble too, causing isResponseNode to match prompts. If the
+    // current claude bundle drops font-claude-message AND
+    // claude-message AND the testids/role, the diagnostic will
+    // print empty hit counts and we'll add a properly assistant-
+    // only anchor instead of resurrecting the bare attribute.
   ],
   promptNodeForResponse: [
     'div[data-testid="user-message"]',
     'div[class*="font-user-message"]',
     'div[class*="user-message"]',
+    '[data-message-author-role="user"]',
+    '[data-testid*="human-message"]',
   ],
 } as const
 
@@ -151,4 +182,83 @@ export const adapter: PlatformAdapter = {
   getPriorTurns,
   isStreaming,
   sendToInput,
+}
+
+// ── One-shot boot diagnostic ─────────────────────────────────
+//
+// Same pattern as the other platform adapters. Fires 4s after
+// module load on claude.ai, prints per-selector hit counts plus
+// answer-shaped + query-shaped element samples. If detection
+// breaks after a Claude redesign, expand the dumped Object in
+// DevTools and paste the response/query samples — that pinpoints
+// the new class names.
+const DEBUG_DIAGNOSTIC = true
+
+if (
+  DEBUG_DIAGNOSTIC &&
+  typeof location !== 'undefined' &&
+  location.hostname.includes('claude.ai')
+) {
+  setTimeout(() => {
+    try {
+      const dump: Record<string, unknown> = {
+        url: location.href,
+        chatContainer: !!getChatContainer(),
+        responseNodes: getAllResponseNodes().length,
+      }
+      for (const sel of SEL.responseNode) {
+        dump[`responseSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+      for (const sel of SEL.chatContainer) {
+        dump[`chatSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+      for (const sel of SEL.promptNodeForResponse) {
+        dump[`promptSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+
+      const answerSamples = Array.from(document.querySelectorAll('div'))
+        .filter((el) => {
+          const txt = el.textContent ?? ''
+          return txt.length > 200 && el.children.length > 0
+        })
+        .slice(0, 5)
+        .map((el) => ({
+          tag: el.tagName,
+          classes: (el.className || '').toString().slice(0, 220),
+          dataTestid: el.getAttribute('data-testid'),
+          dataAuthor:
+            el.getAttribute('data-message-author') ||
+            el.getAttribute('data-message-author-role'),
+          renderCount: el.getAttribute('data-test-render-count'),
+          textLen: (el.textContent ?? '').length,
+        }))
+      dump['response-shaped div samples'] = answerSamples
+
+      const querySamples = [
+        ...Array.from(document.querySelectorAll('[data-testid*="user" i]')),
+        ...Array.from(document.querySelectorAll('[data-message-author-role="user"]')),
+        ...Array.from(document.querySelectorAll('[class*="user-message" i]')),
+        ...Array.from(document.querySelectorAll('[class*="font-user" i]')),
+      ]
+        .filter((el, i, arr) => arr.indexOf(el) === i)
+        .slice(0, 8)
+        .map((el) => ({
+          tag: el.tagName,
+          classes: (el.className || '').toString().slice(0, 220),
+          dataTestid: el.getAttribute('data-testid'),
+          text: (el.textContent ?? '').trim().slice(0, 80),
+        }))
+      dump['query-shaped candidates'] = querySamples
+
+      // Print as a JSON string so the full contents are visible in
+      // the log line itself — Chrome's console truncates inline
+      // Object representations and the user has to expand them
+      // manually otherwise. JSON output is copy-pasteable in one shot.
+      console.log(
+        '[Crith V2 PROV][claude diag]\n' + JSON.stringify(dump, null, 2),
+      )
+    } catch (err) {
+      console.warn('[Crith V2 PROV][claude diag] dump failed', err)
+    }
+  }, 4000)
 }

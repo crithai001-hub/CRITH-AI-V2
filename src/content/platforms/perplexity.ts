@@ -6,22 +6,45 @@ import { collectPriorTurns } from '../shared/dom-helpers'
 import { setInputAndSend } from '../shared/send-input'
 import type { ConversationTurn, PlatformAdapter } from '../../shared/types'
 
+// Perplexity's DOM ships through frequent CSS-module hashing renames,
+// so this list is intentionally redundant. firstMatch() walks
+// top-to-bottom; isResponseNode does a direct .matches() against any
+// of them. If you find a new selector that lands cleanly, prepend it
+// — order matters for getResponseText's "first selector descendant"
+// path (it pulls innerText from the first matching descendant rather
+// than the whole node, which avoids capturing sources/related tabs).
 const SEL = {
   chatContainer: [
     'main [class*="ThreadContainer"]',
     'main [class*="thread"]',
+    'main [data-testid*="thread"]',
     'main',
   ],
   responseNode: [
     '[class*="AnswerBody"]',
     '[class*="answerBody"]',
     '[data-testid*="answer"]',
+    '[data-testid*="message-block-answer"]',
+    'div[class*="MessageContent"]',
+    'div[class*="markdown-body"]',
     '[class*="prose"]',
   ],
   promptNodeForResponse: [
     '[class*="UserQuery"]',
     '[class*="userQuery"]',
     '[data-testid*="user"]',
+    '[data-testid*="message-block-query"]',
+    '[class*="QueryText"]',
+    // Perplexity 2026 typically renders the query as a heading
+    // above the answer block. h1 is the most stable hit; the
+    // font-display / text-3xl / text-2xl tailwind classes are
+    // their query-styling fingerprint and survive renames.
+    'main h1',
+    '[role="heading"][aria-level="1"]',
+    'div[class*="font-display"]',
+    'div[class*="text-3xl"]',
+    'div[class*="text-2xl"]',
+    '[class*="QueryHeader"]',
   ],
 } as const
 
@@ -135,4 +158,87 @@ export const adapter: PlatformAdapter = {
   getPriorTurns,
   isStreaming,
   sendToInput,
+}
+
+// ── One-shot boot diagnostic ─────────────────────────────────
+//
+// Perplexity's class-module hashing breaks the response selectors
+// roughly once a quarter. When the orchestrator boots but no
+// analysis fires, the most likely cause is that none of the
+// SEL.responseNode patterns match the current DOM.
+//
+// This dump runs 4 seconds after this module loads (giving the
+// SPA time to hydrate), prints which selectors hit and which
+// missed, and includes a couple of representative element class
+// names so a user can paste the output back to update SEL.
+//
+// Removed under !DEBUG_DIAGNOSTIC to keep prod console clean
+// when the platform is stable. Toggle on while iterating.
+const DEBUG_DIAGNOSTIC = true
+
+if (DEBUG_DIAGNOSTIC && typeof location !== 'undefined' && location.hostname.includes('perplexity.ai')) {
+  setTimeout(() => {
+    try {
+      const dump: Record<string, unknown> = {
+        url: location.href,
+        chatContainer: !!getChatContainer(),
+        responseNodes: getAllResponseNodes().length,
+      }
+      for (const sel of SEL.responseNode) {
+        dump[`responseSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+      for (const sel of SEL.chatContainer) {
+        dump[`chatSel:${sel}`] = document.querySelectorAll(sel).length
+      }
+      // Sample the first 5 candidate "looks like an answer" classnames
+      // we can find — large divs with markdown content. This helps
+      // identify the new selector pattern after a redesign.
+      const sample = Array.from(
+        document.querySelectorAll('main div'),
+      )
+        .filter((el) => {
+          const txt = el.textContent ?? ''
+          return txt.length > 300 && el.children.length > 0
+        })
+        .slice(0, 5)
+        .map((el) => ({
+          tag: el.tagName,
+          classes: (el.className || '').toString().slice(0, 200),
+          dataTestid: el.getAttribute('data-testid'),
+          textLen: (el.textContent ?? '').length,
+        }))
+      dump['answer-shaped div samples'] = sample
+
+      // User-query candidates — short text blocks at the top of
+      // the thread, often h1 or a styled heading div. We need this
+      // because getPromptForResponse failing returns null which
+      // drops the analyze fire entirely.
+      const queryCandidates = [
+        ...Array.from(document.querySelectorAll('main h1')),
+        ...Array.from(document.querySelectorAll('main [role="heading"]')),
+        ...Array.from(
+          document.querySelectorAll('main [class*="query" i], main [data-testid*="query" i]'),
+        ),
+        ...Array.from(
+          document.querySelectorAll('main [class*="font-display"], main [class*="text-3xl"], main [class*="text-2xl"]'),
+        ),
+      ]
+        .filter((el, i, arr) => arr.indexOf(el) === i)
+        .slice(0, 8)
+        .map((el) => ({
+          tag: el.tagName,
+          classes: (el.className || '').toString().slice(0, 200),
+          dataTestid: el.getAttribute('data-testid'),
+          ariaLevel: el.getAttribute('aria-level'),
+          text: (el.textContent ?? '').trim().slice(0, 80),
+        }))
+      dump['query-shaped candidates'] = queryCandidates
+
+      console.log(
+        '[Crith V2 PROV][perplexity diag]\n' + JSON.stringify(dump, null, 2),
+      )
+    } catch (err) {
+      console.warn('[Crith V2 PROV][perplexity diag] dump failed', err)
+    }
+  }, 4000)
 }

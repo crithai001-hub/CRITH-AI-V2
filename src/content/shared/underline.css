@@ -35,3 +35,55 @@ span.crith-prov-underline[data-crith-prov-type="sycophancy"],
 span.crith-prov-underline[data-crith-prov-type="hallucination"] {
   text-decoration-thickness: 3px;
 }
+
+/* ── Verifiable claims ─────────────────────────────────────────────
+ * Claims (fact-check candidates) get an amber underline, distinct
+ * from validations' platform-color underline. data-crith-prov-kind
+ * is set to "claim" by renderer.ts when wrapping a claim's anchor.
+ * Risk maps to opacity + thickness:
+ *   high   → 100% opacity, 2.5px thick (most visually prominent)
+ *   medium → 85% opacity,  1.8px thick
+ *   low    → 70% opacity,  1.2px thick
+ *
+ * Specificity: span tag + class + 2 attributes = (0,3,1). Beats both
+ * the base validation rule (0,2,1) AND any host site rule reaching
+ * down through .markdown-body p span (0,1,3). When a claim's
+ * anchored_to overlaps with a validation's, the claim's amber
+ * decoration wins via this higher specificity — claims are the
+ * higher-signal flag.
+ */
+span.crith-prov-underline[data-crith-prov-kind="claim"] {
+  text-decoration: underline dotted #F59E0B;
+  text-underline-offset: 3px;
+  opacity: 0.85;
+  text-decoration-thickness: 1.8px;
+}
+span.crith-prov-underline[data-crith-prov-kind="claim"][data-crith-risk="high"] {
+  opacity: 1;
+  text-decoration-thickness: 2.5px;
+}
+span.crith-prov-underline[data-crith-prov-kind="claim"][data-crith-risk="medium"] {
+  opacity: 0.85;
+  text-decoration-thickness: 1.8px;
+}
+span.crith-prov-underline[data-crith-prov-kind="claim"][data-crith-risk="low"] {
+  opacity: 0.7;
+  text-decoration-thickness: 1.2px;
+}
+
+/* ── Hallucination override (purple) ──────────────────────────
+ * Strongest tier: claim was flagged with hallucination_signal=high
+ * AND the verify pipeline returned `contradicted`. The renderer
+ * stamps data-crith-hallucination="true" only in that case, so
+ * matching here gives the amber-vs-purple split the user expects.
+ *
+ * Specificity: span tag + class + 3 attributes = (0,4,1). Beats
+ * the (0,3,1) amber claim rules above so risk-tiered amber styles
+ * are overridden but the underline-thickness from those rules is
+ * preserved by inheriting through text-decoration-thickness which
+ * we don't override here. */
+span.crith-prov-underline[data-crith-prov-kind="claim"][data-crith-hallucination="true"] {
+  text-decoration-color: #A855F7;
+  opacity: 1;
+}
+

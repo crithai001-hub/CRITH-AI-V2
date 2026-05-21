@@ -3,6 +3,7 @@ import {
   analyzeResponse,
   explainProvocation,
   logEvent,
+  verifyClaim,
   isApiError,
 } from '../shared/api-client'
 import { getAuth, getUserEmail } from '../shared/storage'
@@ -14,14 +15,56 @@ import type {
 
 const LOG_PREFIX = '[Crith SW]'
 
+// Top-level boot log. MV3 service workers run this every time the
+// SW wakes (incoming message, alarm, install/startup, etc.), so a
+// log here proves the SW module loaded and the listener below got
+// registered. If you open chrome://extensions and click the
+// "service worker" link, the DevTools console for the SW shows
+// this line on every wake — that's the fastest way to confirm the
+// SW is healthy when chrome reports "Inactive" (which just means
+// "currently idle", not "broken").
+console.log(`${LOG_PREFIX} module loaded @ ${new Date().toISOString()}`)
+
+// ── Keep-alive alarm ─────────────────────────────────────────
+//
+// MV3 idles the SW after ~30s of inactivity. That's by design and
+// can't be disabled, but a chrome.alarms tick counts as an event
+// and wakes the SW just like an incoming message would. Setting
+// periodInMinutes: 0.5 wakes the SW every 30 seconds — exactly
+// when it would otherwise be about to idle. Net effect: from the
+// content script's perspective the SW is always reachable on the
+// first sendMessage, with no perceptible cold-start delay.
+//
+// Registered at top level (every wake re-creates idempotently) +
+// onInstalled + onStartup so the alarm self-heals if it's ever
+// cleared (extension update, browser restart, manual remove).
+const KEEP_ALIVE_ALARM = 'crith-keepalive'
+
+function ensureKeepAliveAlarm(): void {
+  chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 })
+}
+
+ensureKeepAliveAlarm()
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KEEP_ALIVE_ALARM) {
+    // The log alone is the activity that keeps the SW alive — no
+    // work needed. Logging timestamp helps verify cadence in SW
+    // DevTools when debugging "is the SW awake?".
+    console.log(`${LOG_PREFIX} keep-alive @ ${new Date().toISOString()}`)
+  }
+})
+
 // ── Lifecycle ────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener((details) => {
   console.log(`${LOG_PREFIX} installed:`, details.reason)
+  ensureKeepAliveAlarm()
 })
 
 chrome.runtime.onStartup.addListener(() => {
   console.log(`${LOG_PREFIX} startup`)
+  ensureKeepAliveAlarm()
 })
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -136,6 +179,28 @@ async function handleMessage(message: IncomingMessage): Promise<unknown> {
       } else {
         console.log(
           `${LOG_PREFIX} EXPLAIN_PROVOCATION ok len=${result.explanation.length}`,
+        )
+      }
+      return result
+    }
+
+    case 'VERIFY_CLAIM': {
+      console.log(
+        `${LOG_PREFIX} VERIFY_CLAIM analysis_id=${message.payload.analysis_id} claim_index=${message.payload.claim_index}`,
+      )
+      const result = await verifyClaim(
+        message.payload,
+        getAccessTokenWithRefresh,
+      )
+      if (isApiError(result)) {
+        if (result.kind === 'AUTH_REQUIRED' || result.kind === 'QUOTA_EXCEEDED') {
+          console.warn(`${LOG_PREFIX} VERIFY_CLAIM error:`, result)
+        } else {
+          console.error(`${LOG_PREFIX} VERIFY_CLAIM error:`, result)
+        }
+      } else {
+        console.log(
+          `${LOG_PREFIX} VERIFY_CLAIM ok verdict=${result.verdict} sources=${result.source_urls.length} verification_id=${result.verification_id}`,
         )
       }
       return result

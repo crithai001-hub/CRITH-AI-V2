@@ -15,6 +15,7 @@
 // The explanation is cached on the card's local state. A second tap of
 // Explain after the user navigates back does NOT re-call the backend.
 
+import { clampCardToViewport } from './card-position'
 import type { ApiError, ExplainResponse, PlatformAdapter, Validation } from '../../shared/types'
 
 const COLLAPSE_GRACE_MS = 200
@@ -63,13 +64,10 @@ export function attach(
   const logo = _logo
   const card = _card
 
+  // Required for every card. If any of these is missing the markup is
+  // broken upstream in renderer.ts — bail rather than render a partial
+  // card.
   const _text = card.querySelector('.text') as HTMLParagraphElement | null
-  const _loader = card.querySelector('.loader') as HTMLParagraphElement | null
-  const _errorMsg = card.querySelector('.error-msg') as HTMLParagraphElement | null
-  const _backLink = card.querySelector('.back-link') as HTMLAnchorElement | null
-  const _explainBtn = card.querySelector(
-    'button[data-action="explain"]',
-  ) as HTMLButtonElement | null
   const _notUsefulBtn = card.querySelector(
     'button[data-action="not_useful"]',
   ) as HTMLButtonElement | null
@@ -80,24 +78,29 @@ export function attach(
     'button[data-action="ask_ai"]',
   ) as HTMLButtonElement | null
 
-  if (
-    !_text || !_loader || !_errorMsg || !_backLink ||
-    !_explainBtn || !_notUsefulBtn || !_usefulBtn || !_askAiBtn
-  ) {
+  if (!_text || !_notUsefulBtn || !_usefulBtn || !_askAiBtn) {
     return
   }
+
+  // Optional — left over from the now-removed Explain feature. The
+  // renderer still creates these elements (back-link, loader,
+  // error-msg) but no code path activates them. Kept as nullable
+  // refs so future re-introduction of an Explain affordance doesn't
+  // require re-querying.
+  const _backLink = card.querySelector('.back-link') as HTMLAnchorElement | null
+  const _loader = card.querySelector('.loader') as HTMLParagraphElement | null
+  const _errorMsg = card.querySelector('.error-msg') as HTMLParagraphElement | null
 
   // Re-bind to fresh consts so the closures defined below capture the
   // narrowed (non-null) types. TS doesn't preserve narrowing across
   // closures via the original variables alone.
   const text = _text
-  const loader = _loader
-  const errorMsg = _errorMsg
-  const backLink = _backLink
-  const explainBtn = _explainBtn
   const notUsefulBtn = _notUsefulBtn
   const usefulBtn = _usefulBtn
   const askAiBtn = _askAiBtn
+  const loader = _loader
+  const errorMsg = _errorMsg
+  const backLink = _backLink
 
   const problemText = (validation.problem || '').slice(0, 320)
   const followUpPrompt = validation.follow_up_prompt || ''
@@ -165,15 +168,16 @@ export function attach(
       errorTimer = null
     }
 
+    // The 'loading' / 'explained' / 'error' states only fire from the
+    // Explain flow which is no longer wired (button removed). They're
+    // kept here for re-introduction; in practice only 'default' runs.
     switch (state) {
       case 'default': {
         text.textContent = problemText
         text.hidden = false
-        loader.hidden = true
-        errorMsg.hidden = true
-        backLink.hidden = true
-        explainBtn.hidden = false
-        explainBtn.disabled = !hasIds
+        if (loader) loader.hidden = true
+        if (errorMsg) errorMsg.hidden = true
+        if (backLink) backLink.hidden = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -181,13 +185,10 @@ export function attach(
         break
       }
       case 'loading': {
-        // Hide question; show "Thinking…". Not useful / Useful / Ask AI
-        // remain clickable so the user can bail out / rate at any time.
         text.hidden = true
-        loader.hidden = false
-        errorMsg.hidden = true
-        backLink.hidden = true
-        explainBtn.disabled = true
+        if (loader) loader.hidden = false
+        if (errorMsg) errorMsg.hidden = true
+        if (backLink) backLink.hidden = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -197,11 +198,9 @@ export function attach(
       case 'explained': {
         text.textContent = cachedExplanation ?? ''
         text.hidden = false
-        loader.hidden = true
-        errorMsg.hidden = true
-        backLink.hidden = false
-        explainBtn.hidden = true
-        explainBtn.disabled = true
+        if (loader) loader.hidden = true
+        if (errorMsg) errorMsg.hidden = true
+        if (backLink) backLink.hidden = false
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -209,16 +208,11 @@ export function attach(
         break
       }
       case 'error': {
-        // Functionally the same UI as 'default' plus a transient
-        // error line. Auto-revert after ERROR_DISPLAY_MS so the line
-        // doesn't persist if the user tries again immediately.
         text.textContent = problemText
         text.hidden = false
-        loader.hidden = true
-        errorMsg.hidden = false
-        backLink.hidden = true
-        explainBtn.hidden = false
-        explainBtn.disabled = !hasIds
+        if (loader) loader.hidden = true
+        if (errorMsg) errorMsg.hidden = false
+        if (backLink) backLink.hidden = true
         notUsefulBtn.disabled = false
         usefulBtn.disabled = false
         applyRatingLock()
@@ -235,19 +229,26 @@ export function attach(
 
   // ── Hover/tap → open/close ──────────────────────────────────
 
-  const open = (): void => {
+  const open = (source: string): void => {
+    console.log('[Crith V2 CARD] open() called by', source)
     if (collapseTimer != null) {
       clearTimeout(collapseTimer)
       collapseTimer = null
     }
+    // Raise the host above its siblings so the expanded card draws
+    // on top when adjacent stacked hosts would otherwise occlude it.
+    // 2147483647 is the highest in-spec value; base hosts sit at
+    // 2147483640 (set in renderer.createHost / createClaimHost).
+    host.style.zIndex = '2147483647'
     card.classList.add('open')
+    clampCardToViewport(card)
   }
   const closeSoon = (): void => {
     if (collapseTimer != null) clearTimeout(collapseTimer)
-    collapseTimer = setTimeout(
-      () => card.classList.remove('open'),
-      COLLAPSE_GRACE_MS,
-    )
+    collapseTimer = setTimeout(() => {
+      card.classList.remove('open')
+      host.style.zIndex = '2147483640'
+    }, COLLAPSE_GRACE_MS)
   }
   const cancelClose = (): void => {
     if (collapseTimer != null) {
@@ -258,15 +259,63 @@ export function attach(
 
   const triggers: HTMLElement[] = [logo, ...extraTriggers]
   for (const t of triggers) {
-    t.addEventListener('mouseenter', open)
+    t.addEventListener('mouseenter', () => open('mouseenter'))
     t.addEventListener('touchstart', (e: Event) => {
-      open()
+      open('touchstart')
       e.stopPropagation()
     }, { passive: true })
     t.addEventListener('mouseleave', closeSoon)
   }
   card.addEventListener('mouseenter', cancelClose)
   card.addEventListener('mouseleave', closeSoon)
+
+  // ── Defensive fallback: document-level event delegation ─────
+  //
+  // Per-element listeners above are the primary path, but they break
+  // when ChatGPT's React re-renders the assistant message and replaces
+  // our underline span DOM. The capturing document-level handler
+  // catches mouseover events that bubble up from any descendant of
+  // the host (covers the logo) OR any element whose textContent
+  // matches one of our underline targets (covers re-rendered spans
+  // even with new identity). Cheap and idempotent — calling
+  // open('delegated') when the card is already open is a no-op.
+  const handleDocMouseOver = (e: MouseEvent): void => {
+    const target = e.target as Element | null
+    if (!target) return
+    // Hover within the host itself (logo, card, etc.)?
+    if (target === host || host.contains(target)) {
+      open('host-delegated')
+      return
+    }
+    // Hover on one of the underline spans we created (or React's
+    // replacement that has the same data attribute + text)?
+    if (target instanceof HTMLElement && target.matches('span.crith-prov-underline[data-crith-prov="underline"]')) {
+      // Match by anchored_to text — we can't trust span identity across
+      // re-renders, but ChatGPT can't replace the text content without
+      // breaking the visible underline.
+      if (target.textContent && extraTriggers.some((t) => t.textContent === target.textContent)) {
+        open('span-delegated')
+      }
+    }
+  }
+  const handleDocMouseOut = (e: MouseEvent): void => {
+    const target = e.target as Element | null
+    const related = e.relatedTarget as Element | null
+    if (!target) return
+    // Leaving the host or an underline span, AND not entering another
+    // related trigger? Schedule a close.
+    if (target === host || host.contains(target) ||
+        (target instanceof HTMLElement && target.matches('span.crith-prov-underline'))) {
+      // Don't close if we're moving into another relevant element
+      if (related && (related === host || host.contains(related) ||
+          (related instanceof HTMLElement && related.matches('span.crith-prov-underline')))) {
+        return
+      }
+      closeSoon()
+    }
+  }
+  document.addEventListener('mouseover', handleDocMouseOver, true)
+  document.addEventListener('mouseout', handleDocMouseOut, true)
 
   // ── Explain handler ─────────────────────────────────────────
 
@@ -393,12 +442,17 @@ export function attach(
   }
 
   // ── Back-to-question handler ────────────────────────────────
+  // Only wires up if the back-link element exists (it does, the
+  // renderer still creates it) but tolerates a future markup change
+  // that might drop it.
 
-  backLink.addEventListener('click', (e: Event) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setState('default')
-  })
+  if (backLink) {
+    backLink.addEventListener('click', (e: Event) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setState('default')
+    })
+  }
 
   // ── Button click handlers ───────────────────────────────────
 

@@ -17,7 +17,8 @@
 //   - 'verification' renamed to 'hallucination'.
 
 import { attach as attachCard } from './card'
-import type { Lens, Validation } from '../../shared/types'
+import { attachClaim } from './claim-card'
+import type { Lens, Risk, Validation, VerifiableClaim } from '../../shared/types'
 
 const DEBUG = true
 const LOG_PREFIX = '[Crith V2 PROV RENDER]'
@@ -25,11 +26,20 @@ function log(...args: unknown[]): void { if (DEBUG) console.log(LOG_PREFIX, ...a
 function warn(...args: unknown[]): void { if (DEBUG) console.warn(LOG_PREFIX, ...args) }
 
 const NARROW_VIEWPORT_PX = 768
-// Vertical offset between stacked logos for one response carrying
-// multiple provocations. Bumped from 28 to 36 for the larger 24px
-// logo + the 8px hit-area extension so adjacent hosts don't overlap
-// each other's hover zones.
-const STACK_SPACING_PX = 36
+// Vertical offset between stacked logos. The host's visible footprint
+// is logo (24x24) + dot (extending 8px above-right with white ring +
+// shadow) ≈ 28-30px tall. 44px spacing leaves a comfortable 14px gap
+// between stacked logos, plus enough margin for the hit-area ::before
+// pseudo not to butt up against the next logo's clickable region.
+const STACK_SPACING_PX = 44
+// Used when bumping a host past an existing collision (different
+// responseNode at the same x). Match STACK_SPACING_PX so anti-collision
+// shifts read as part of the same vertical rhythm as same-response
+// stacking.
+const COLLISION_BUMP_PX = STACK_SPACING_PX
+// Cap collision-avoidance loop so a pathological page can't pin
+// the main thread.
+const MAX_COLLISION_BUMPS = 20
 
 const SHADOW_STYLES = `
   :host { all: initial; }
@@ -60,15 +70,38 @@ const SHADOW_STYLES = `
   }
   .crith-prov-logo.pulse { animation: prov-pulse 1.6s ease-out 1; }
   .crith-prov-logo.handled { opacity: 0.55; }
-  .crith-prov-mark { display: block; width: 13px; height: 19.5px; }
+  .crith-prov-mark {
+    display: block;
+    width: 13px;
+    height: 19.5px;
+    /* CSS overrides the SVG's hardcoded stroke="#fff" presentation
+     * attribute (CSS wins). Default stays white so existing platforms
+     * (ChatGPT green, Claude orange, etc.) read the same as before;
+     * Grok's near-white logo bg sets --crith-prov-mark-color to
+     * #000 in prov-orchestrator.ts so the mark stays visible. */
+    stroke: var(--crith-prov-mark-color, #fff);
+  }
 
   .crith-prov-dot {
     position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 8px;
-    height: 8px;
+    top: -3px;
+    right: -3px;
+    width: 11px;
+    height: 11px;
     border-radius: 50%;
+    /* White ring lifts the dot off the platform-colored logo
+     * regardless of its background — green/orange/blue all read
+     * fine through the contrast. Shadow adds a small physical
+     * lift so the dot looks like a separate element pinned on
+     * top of the logo, not an artifact of the logo itself. */
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  }
+  @media (prefers-color-scheme: dark) {
+    .crith-prov-dot {
+      border-color: #1f1f23;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    }
   }
 
   @keyframes prov-pulse {
@@ -80,6 +113,12 @@ const SHADOW_STYLES = `
   .card {
     position: absolute; top: 32px; right: 0;
     width: 320px; max-width: 90vw;
+    /* max-height + overflow-y mean even a very tall card (lots of
+       evidence text + sources) never extends past the viewport.
+       Combined with the JS flip-up logic in open(), the card is
+       always fully visible. */
+    max-height: 80vh;
+    overflow-y: auto;
     background: #fff; color: #111;
     border: 1px solid rgba(0,0,0,0.08);
     border-radius: 8px;
@@ -233,6 +272,281 @@ const SHADOW_STYLES = `
       background: rgba(255, 255, 255, 0.12);
     }
   }
+
+  /* ── Claim host overrides ─────────────────────────────────
+     Selectors are scoped via :host([data-kind="claim"]) so they
+     only apply to claim hosts; validation hosts (no data-kind
+     or data-kind="validation") get the styles above unchanged.
+
+     Note: claim hosts intentionally inherit the platform brand
+     color from the base .crith-prov-logo rule (var(--crith-prov-color))
+     — same logo color as validations, same as the platform's accent
+     (green on ChatGPT, orange on Claude, etc.). Differentiation
+     between fact-check and hallucination happens via the small
+     top-right .crith-prov-dot, set in createClaimHost. */
+
+  /* Card variables — base accent for fact-check (amber), overridden
+   * to purple by the [data-hallucination="high"] selector below.
+   * Single source of truth so verdict / sources / accent stripe all
+   * stay in sync without repeating color triplets across rules. */
+  :host([data-kind="claim"]) {
+    --crith-accent:        #d97706;
+    --crith-accent-strong: #b45309;
+    --crith-accent-bg:     rgba(245, 158, 11, 0.10);
+    --crith-accent-bg-strong: rgba(245, 158, 11, 0.18);
+    --crith-accent-border: rgba(245, 158, 11, 0.40);
+  }
+  :host([data-kind="claim"][data-hallucination="high"]) {
+    --crith-accent:        #9333ea;
+    --crith-accent-strong: #6b21a8;
+    --crith-accent-bg:     rgba(168, 85, 247, 0.10);
+    --crith-accent-bg-strong: rgba(168, 85, 247, 0.18);
+    --crith-accent-border: rgba(168, 85, 247, 0.40);
+  }
+
+  :host([data-kind="claim"]) .card {
+    width: 380px;
+    padding: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+  }
+
+  /* Top accent stripe — communicates "fact-check" vs "hallucination"
+   * at a glance before the user reads anything. */
+  :host([data-kind="claim"]) .card::before {
+    content: '';
+    display: block;
+    height: 4px;
+    background: var(--crith-accent);
+  }
+
+  /* All inner sections wrap inside the existing flat .card layout —
+   * use uniform horizontal padding and tighter section margins. */
+  :host([data-kind="claim"]) .claim-header,
+  :host([data-kind="claim"]) .claim-text,
+  :host([data-kind="claim"]) .why-verify,
+  :host([data-kind="claim"]) .verify-result,
+  :host([data-kind="claim"]) .controls {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  /* ── Header: verdict badge + meta chips ───────────────────── */
+  :host([data-kind="claim"]) .claim-header {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 0;
+    padding-top: 14px;
+    padding-bottom: 0;
+  }
+  :host([data-kind="claim"]) .claim-type-badge,
+  :host([data-kind="claim"]) .risk-badge {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    padding: 3px 7px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  :host([data-kind="claim"]) .claim-type-badge {
+    background: rgba(0, 0, 0, 0.045);
+    color: rgba(0, 0, 0, 0.55);
+  }
+  :host([data-kind="claim"]) .risk-badge[data-risk="high"] {
+    background: var(--crith-accent-bg-strong);
+    color: var(--crith-accent-strong);
+  }
+  :host([data-kind="claim"]) .risk-badge[data-risk="medium"] {
+    background: var(--crith-accent-bg);
+    color: var(--crith-accent-strong);
+  }
+  :host([data-kind="claim"]) .risk-badge[data-risk="low"] {
+    background: rgba(0, 0, 0, 0.05);
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  /* ── Claim text: the quote being checked ──────────────────── */
+  :host([data-kind="claim"]) .claim-text {
+    margin: 10px 0 4px 0;
+    font-size: 13.5px;
+    line-height: 1.5;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.85);
+    /* Subtle leading quote glyph so the user knows this is the
+     * AI's text, not our commentary. */
+    border-left: 2px solid var(--crith-accent);
+    padding-left: 10px;
+    margin-left: 16px;
+    padding-right: 0;
+  }
+  :host([data-kind="claim"]) .why-verify {
+    margin: 0 0 12px 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: rgba(0, 0, 0, 0.5);
+    font-style: italic;
+  }
+
+  /* ── Verify result: verdict hero + evidence + sources ─────── */
+  :host([data-kind="claim"]) .verify-result {
+    margin: 0;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    background: var(--crith-accent-bg);
+    border-top: 1px solid var(--crith-accent-border);
+  }
+  :host([data-kind="claim"]) .verdict-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 5px 12px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    margin: 0 0 10px 0;
+  }
+  /* Generic verdict states — only contradicted is reachable in
+   * the new flow, but the others stay defined for any future
+   * confirmed / inconclusive surface. */
+  :host([data-kind="claim"]) .verdict-confirmed {
+    background: rgba(16, 163, 127, 0.15);
+    color: #047857;
+    border: 1px solid rgba(16, 163, 127, 0.35);
+  }
+  :host([data-kind="claim"]) .verdict-contradicted {
+    background: var(--crith-accent-bg-strong);
+    color: var(--crith-accent-strong);
+    border: 1px solid var(--crith-accent-border);
+  }
+  :host([data-kind="claim"]) .verdict-inconclusive {
+    background: rgba(0, 0, 0, 0.06);
+    color: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(0, 0, 0, 0.15);
+  }
+  :host([data-kind="claim"]) .verdict-error {
+    background: rgba(0, 0, 0, 0.05);
+    color: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(0, 0, 0, 0.15);
+  }
+  :host([data-kind="claim"]) .evidence {
+    margin: 0 0 10px 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: rgba(0, 0, 0, 0.78);
+  }
+  :host([data-kind="claim"]) .sources-details {
+    font-size: 11.5px;
+  }
+  :host([data-kind="claim"]) .sources-summary {
+    cursor: pointer;
+    color: var(--crith-accent-strong);
+    user-select: none;
+    font-weight: 600;
+    outline: none;
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  :host([data-kind="claim"]) .sources-summary::-webkit-details-marker {
+    display: none;
+  }
+  :host([data-kind="claim"]) .sources-summary::before {
+    content: '\\25b6';
+    display: inline-block;
+    font-size: 8px;
+    transition: transform 160ms ease;
+    color: var(--crith-accent);
+  }
+  :host([data-kind="claim"]) .sources-details[open] .sources-summary::before {
+    transform: rotate(90deg);
+  }
+  :host([data-kind="claim"]) .sources-list {
+    list-style: none;
+    margin: 8px 0 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  :host([data-kind="claim"]) .sources-list li {
+    margin: 0;
+    padding: 0;
+  }
+  :host([data-kind="claim"]) .sources-list a {
+    display: inline-block;
+    color: var(--crith-accent-strong);
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid var(--crith-accent-border);
+    padding: 4px 10px;
+    border-radius: 999px;
+    text-decoration: none;
+    font-size: 11.5px;
+    font-weight: 500;
+    word-break: break-all;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  :host([data-kind="claim"]) .sources-list a:hover {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: var(--crith-accent);
+  }
+
+  /* ── Footer controls ──────────────────────────────────────── */
+  :host([data-kind="claim"]) .controls {
+    padding-top: 12px;
+    padding-bottom: 14px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :host([data-kind="claim"]) {
+      --crith-accent-bg:     rgba(245, 158, 11, 0.14);
+      --crith-accent-bg-strong: rgba(245, 158, 11, 0.22);
+    }
+    :host([data-kind="claim"][data-hallucination="high"]) {
+      --crith-accent:        #c084fc;
+      --crith-accent-strong: #d8b4fe;
+      --crith-accent-bg:     rgba(168, 85, 247, 0.16);
+      --crith-accent-bg-strong: rgba(168, 85, 247, 0.26);
+      --crith-accent-border: rgba(168, 85, 247, 0.45);
+    }
+    :host([data-kind="claim"]) .claim-type-badge {
+      background: rgba(255, 255, 255, 0.06);
+      color: rgba(255, 255, 255, 0.65);
+    }
+    :host([data-kind="claim"]) .risk-badge[data-risk="low"] {
+      background: rgba(255, 255, 255, 0.06);
+      color: rgba(255, 255, 255, 0.55);
+    }
+    :host([data-kind="claim"]) .claim-text {
+      color: rgba(255, 255, 255, 0.92);
+    }
+    :host([data-kind="claim"]) .why-verify {
+      color: rgba(255, 255, 255, 0.55);
+    }
+    :host([data-kind="claim"]) .evidence {
+      color: rgba(255, 255, 255, 0.85);
+    }
+    :host([data-kind="claim"]) .verdict-confirmed {
+      background: rgba(16, 163, 127, 0.22);
+      color: #34d399;
+    }
+    :host([data-kind="claim"]) .verdict-inconclusive {
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.65);
+    }
+    :host([data-kind="claim"]) .sources-list a {
+      background: rgba(255, 255, 255, 0.06);
+    }
+    :host([data-kind="claim"]) .sources-list a:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  }
 `
 
 // Crith brand mark — same 12x18 path geometry as V1.
@@ -287,65 +601,216 @@ function isHighSignalLens(lens: Lens): boolean {
 }
 
 /**
- * Render an array of validations against a single response node. Each
- * gets its own underline + shadow-DOM host, stacked vertically.
+ * Per-responseNode logo stack counter. Render functions are now called
+ * incrementally (validations sync at analyze time; claims async after
+ * VERIFY_CLAIM resolves contradicted), so we can't pass a single
+ * stackIndex through one show() call. The WeakMap lets each render
+ * pull the next free slot for whichever responseNode it targets.
  */
-export function show(responseNode: Element, validations: Validation[]): void {
-  if (!Array.isArray(validations) || validations.length === 0) return
-  let stackIndex = 0
-  for (const validation of validations) {
-    if (!validation) continue
-    const provocationId = validation.provocation_id
-    if (!provocationId) continue
+const stackCounters = new WeakMap<Element, number>()
 
-    // Idempotency: skip if a host for this provocation id already exists.
-    try {
-      const sel = `crith-prov-host[data-prov-id="${CSS.escape(provocationId)}"]`
-      if (document.querySelector(sel)) { stackIndex++; continue }
-    } catch { /* noop */ }
+function nextStackIndex(node: Element): number {
+  return stackCounters.get(node) ?? 0
+}
 
-    const target = validation.anchored_to || ''
+function bumpStackIndex(node: Element): void {
+  stackCounters.set(node, (stackCounters.get(node) ?? 0) + 1)
+}
 
-    // Dedupe by anchored_to — replace any prior render that targets the
-    // same phrase (handles outer/inner wrapper double-fire on ChatGPT).
-    if (target) {
-      document.querySelectorAll('crith-prov-host[data-target]').forEach((host) => {
-        if (host.getAttribute('data-target') !== target) return
-        try { host.remove() } catch { /* noop */ }
-      })
-      document.querySelectorAll('span.crith-prov-underline').forEach((span) => {
-        if (span.textContent !== target) return
-        const parent = span.parentNode
-        if (!parent) return
-        while (span.firstChild) parent.insertBefore(span.firstChild, span)
-        parent.removeChild(span)
-      })
-    }
+/**
+ * Render validations + verifiable claims against a single response node.
+ * May be called multiple times on the same responseNode — claims arrive
+ * asynchronously after their VERIFY_CLAIM verdict is known to be
+ * "contradicted" — so the stack counter is kept on a WeakMap rather
+ * than re-derived from local state each call.
+ *
+ * @param claims - only contradicted-and-verified claims should be passed.
+ *   The orchestrator pre-populates the verdict cache via
+ *   setClaimVerdict() before this call so the card opens directly in
+ *   the verified state.
+ */
+export function show(
+  responseNode: Element,
+  validations: Validation[],
+  claims: VerifiableClaim[] = [],
+): void {
+  const safeValidations = Array.isArray(validations) ? validations : []
+  const safeClaims = Array.isArray(claims) ? claims : []
+  if (safeValidations.length === 0 && safeClaims.length === 0) return
 
-    const spans = wrapUnderline(responseNode, validation.anchored_to, validation.lens)
-    if (spans.length === 0) continue
-    const firstSpan = spans[0]
-    if (!firstSpan) continue
-
-    const host = createHost(provocationId, validation, spans)
-    if (target) host.setAttribute('data-target', target)
-    host.setAttribute('data-stack-index', String(stackIndex))
-    document.body.appendChild(host)
-    positionHost(host, firstSpan, responseNode)
-    attachReposition(host, firstSpan, responseNode)
-
-    requestAnimationFrame(() => {
-      try {
-        const logo = host.shadowRootClosed?.querySelector?.('.crith-prov-logo')
-        if (logo) logo.classList.add('pulse')
-      } catch { /* noop */ }
-    })
-
-    stackIndex++
+  for (const validation of safeValidations) {
+    renderValidationItem(responseNode, validation)
+  }
+  for (const claim of safeClaims) {
+    renderClaimItem(responseNode, claim)
   }
 }
 
-function wrapUnderline(responseNode: Element, target: string, lens: Lens): HTMLSpanElement[] {
+/**
+ * Render one validation. Returns true if a host was placed, false if
+ * skipped (missing id, anchor not found in response, idempotent dupe).
+ */
+function renderValidationItem(
+  responseNode: Element,
+  validation: Validation,
+): boolean {
+  if (!validation) return false
+  const provocationId = validation.provocation_id
+  if (!provocationId) return false
+
+  try {
+    const sel = `crith-prov-host[data-prov-id="${CSS.escape(provocationId)}"]`
+    if (document.querySelector(sel)) return true
+  } catch { /* noop */ }
+
+  const target = validation.anchored_to || ''
+  if (target) {
+    dedupePriorRender(target)
+  }
+
+  const spans = wrapUnderline(responseNode, validation.anchored_to, {
+    kind: 'validation',
+    lens: validation.lens,
+  })
+  if (spans.length === 0) return false
+  const firstSpan = spans[0]
+  if (!firstSpan) return false
+
+  const stackIndex = nextStackIndex(responseNode)
+  const host = createHost(provocationId, validation, spans)
+  if (target) host.setAttribute('data-target', target)
+  host.setAttribute('data-stack-index', String(stackIndex))
+  document.body.appendChild(host)
+  positionHost(host, firstSpan, responseNode)
+  attachReposition(host, firstSpan, responseNode)
+  bumpStackIndex(responseNode)
+
+  logHostPlaced(host, firstSpan, 'validation')
+
+  requestAnimationFrame(() => {
+    try {
+      const logo = host.shadowRoot?.querySelector?.('.crith-prov-logo')
+      if (logo) logo.classList.add('pulse')
+    } catch { /* noop */ }
+  })
+
+  return true
+}
+
+/**
+ * Render one verifiable claim. Same lifecycle as a validation but uses
+ * the amber color scheme + claim-specific card markup. Only called for
+ * claims whose verdict has resolved to "contradicted" — the underline is
+ * a "this part has been disproven" flag, not a "you might want to check
+ * this" flag.
+ */
+function renderClaimItem(
+  responseNode: Element,
+  claim: VerifiableClaim,
+): boolean {
+  if (!claim) return false
+  if (
+    typeof claim.analysis_id !== 'string' ||
+    typeof claim.claim_index !== 'number'
+  ) {
+    warn('claim missing analysis_id or claim_index — orchestrator should stamp', claim)
+    return false
+  }
+  const claimDomId = `claim-${claim.analysis_id}-${claim.claim_index}`
+
+  try {
+    const sel = `crith-prov-host[data-prov-id="${CSS.escape(claimDomId)}"]`
+    if (document.querySelector(sel)) return true
+  } catch { /* noop */ }
+
+  const target = claim.anchored_to || ''
+  // Don't dedupe across kinds — a validation and claim CAN coexist on
+  // the same anchor text. Only dedupe within the SAME kind (claim hosts
+  // share the data-target attribute namespace with validation hosts but
+  // we filter by the host's data-kind so we don't wipe a validation
+  // when adding a claim).
+
+  const isHallucination = claim.hallucination_signal === 'high'
+  const spans = wrapUnderline(responseNode, claim.anchored_to, {
+    kind: 'claim',
+    risk: claim.risk,
+    hallucination: isHallucination,
+  })
+  if (spans.length === 0) return false
+  const firstSpan = spans[0]
+  if (!firstSpan) return false
+
+  const stackIndex = nextStackIndex(responseNode)
+  const host = createClaimHost(claimDomId, claim, spans)
+  if (target) host.setAttribute('data-target', target)
+  host.setAttribute('data-stack-index', String(stackIndex))
+  document.body.appendChild(host)
+  positionHost(host, firstSpan, responseNode)
+  attachReposition(host, firstSpan, responseNode)
+  bumpStackIndex(responseNode)
+
+  logHostPlaced(host, firstSpan, 'claim')
+
+  requestAnimationFrame(() => {
+    try {
+      const logo = host.shadowRoot?.querySelector?.('.crith-prov-logo')
+      if (logo) logo.classList.add('pulse')
+    } catch { /* noop */ }
+  })
+
+  return true
+}
+
+/**
+ * Remove any prior validation host + unwrap any prior validation span
+ * targeting `target`. Called only by validation rendering — claims do
+ * NOT dedupe across to validations (they can coexist on the same
+ * anchor text by design, distinguished by host data-kind).
+ */
+function dedupePriorRender(target: string): void {
+  document.querySelectorAll('crith-prov-host[data-target]').forEach((host) => {
+    if (host.getAttribute('data-target') !== target) return
+    if (host.getAttribute('data-kind') === 'claim') return
+    try { host.remove() } catch { /* noop */ }
+  })
+  document
+    .querySelectorAll('span.crith-prov-underline:not([data-crith-prov-kind="claim"])')
+    .forEach((span) => {
+      if (span.textContent !== target) return
+      const parent = span.parentNode
+      if (!parent) return
+      while (span.firstChild) parent.insertBefore(span.firstChild, span)
+      parent.removeChild(span)
+    })
+}
+
+function logHostPlaced(
+  host: HTMLElement,
+  firstSpan: Element,
+  kind: 'validation' | 'claim',
+): void {
+  const spanRect = firstSpan.getBoundingClientRect()
+  const hostRect = host.getBoundingClientRect()
+  log(
+    `${kind} host placed | host_xy=(${Math.round(hostRect.left)},${Math.round(hostRect.top)}) ` +
+      `host_size=${Math.round(hostRect.width)}x${Math.round(hostRect.height)} | ` +
+      `span_xy=(${Math.round(spanRect.left)},${Math.round(spanRect.top)}) ` +
+      `span_size=${Math.round(spanRect.width)}x${Math.round(spanRect.height)} | ` +
+      `host_in_body=${document.body.contains(host)} | ` +
+      `host_display=${getComputedStyle(host).display} ` +
+      `host_visibility=${getComputedStyle(host).visibility}`,
+  )
+}
+
+type UnderlineDecoration =
+  | { kind: 'validation'; lens: Lens }
+  | { kind: 'claim'; risk: Risk; hallucination: boolean }
+
+function wrapUnderline(
+  responseNode: Element,
+  target: string,
+  decoration: UnderlineDecoration,
+): HTMLSpanElement[] {
   if (!target || target.length < 3) {
     warn(`empty/short anchored_to (len ${target?.length ?? 0}) — skipping`)
     return []
@@ -393,8 +858,21 @@ function wrapUnderline(responseNode: Element, target: string, lens: Lens): HTMLS
     // like `.markdown-body p span` (0,1,3) that would otherwise hide
     // the underline while the logo still anchors correctly.
     span.setAttribute('data-crith-prov', 'underline')
-    if (isHighSignalLens(lens)) {
-      span.setAttribute('data-crith-prov-type', lens)
+    if (decoration.kind === 'validation') {
+      if (isHighSignalLens(decoration.lens)) {
+        span.setAttribute('data-crith-prov-type', decoration.lens)
+      }
+    } else {
+      span.setAttribute('data-crith-prov-kind', 'claim')
+      span.setAttribute('data-crith-risk', decoration.risk)
+      // Stamp the hallucination flag so the page-DOM CSS can swap
+      // the amber dotted underline for purple. The attribute is
+      // only present when hallucination_signal === 'high' AND the
+      // verify pipeline returned `contradicted` — the strongest
+      // available "AI fabricated this" signal.
+      if (decoration.hallucination) {
+        span.setAttribute('data-crith-hallucination', 'true')
+      }
     }
     span.textContent = middle
     const parent = w.node.parentNode
@@ -405,14 +883,21 @@ function wrapUnderline(responseNode: Element, target: string, lens: Lens): HTMLS
     parent.removeChild(w.node)
     spans.push(span)
   }
-  log(`wrapped ${spans.length} span(s) for "${target.slice(0, 60)}${target.length > 60 ? '…' : ''}" (lens=${lens})`)
+  const tag = decoration.kind === 'validation'
+    ? `lens=${decoration.lens}`
+    : `kind=claim risk=${decoration.risk}`
+  log(`wrapped ${spans.length} span(s) for "${target.slice(0, 60)}${target.length > 60 ? '…' : ''}" (${tag})`)
   return spans
 }
 
-// Closed shadow roots aren't readable via host.shadowRoot. We stash the
-// root on the host element with a non-standard property so the rAF pulse
-// step can find the logo. Type augmentation on HTMLElement is local.
-type HostWithShadow = HTMLElement & { shadowRootClosed?: ShadowRoot }
+// Open shadow root — accessible via the standard host.shadowRoot
+// property. We previously used closed mode + a non-standard
+// shadowRootClosed property, but that was failing in production for
+// reasons not yet fully understood (possibly site scripts or browser
+// extensions stripping non-standard JS props). Open mode trades a
+// thin layer of "site scripts can see our shadow" isolation for
+// reliable, debuggable access from DevTools and the rAF pulse step.
+type HostWithShadow = HTMLElement
 
 function createHost(
   provocationId: string,
@@ -425,9 +910,12 @@ function createHost(
   // the conversation thread has its own inner scroll container — so an
   // absolutely-positioned host anchored to body would stay at a fixed
   // PAGE coordinate and become off-screen the moment the chat scrolls.
-  host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483647; pointer-events: none;'
-  const root = host.attachShadow({ mode: 'closed' })
-  host.shadowRootClosed = root
+  // Base z-index sits one below max so we have one slot to raise the
+  // host into when its card opens — see card.ts/claim-card.ts open()
+  // which bumps to 2147483647 so the open card overlaps adjacent
+  // hosts whose stacks would otherwise occlude it.
+  host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483640; pointer-events: none;'
+  const root = host.attachShadow({ mode: 'open' })
 
   const style = document.createElement('style')
   style.textContent = SHADOW_STYLES
@@ -519,17 +1007,203 @@ function createHost(
   return host
 }
 
+/**
+ * Build a shadow-DOM host for a verifiable claim. Mirrors createHost() but
+ * with the fact-check card markup: claim-type + risk badges, claim text,
+ * why-verify rationale, hidden verify-result block (verdict badge +
+ * evidence + collapsible sources), and a [Useful] [Not useful] [Verify ↻]
+ * button row. The amber accent + claim-host styling is driven by the
+ * data-kind="claim" attribute set on the host (matched by the
+ * :host([data-kind="claim"]) rules in SHADOW_STYLES).
+ */
+function createClaimHost(
+  claimDomId: string,
+  claim: VerifiableClaim,
+  underlineSpans: HTMLSpanElement[],
+): HostWithShadow {
+  const host = document.createElement('crith-prov-host') as HostWithShadow
+  host.setAttribute('data-prov-id', claimDomId)
+  host.setAttribute('data-kind', 'claim')
+  // Stamp hallucination signal so SHADOW_STYLES can swap the amber
+  // host accents for purple. We only set the attribute when the
+  // claim is a high-signal hallucination — medium/none never
+  // reach the render path (medium that came back contradicted is
+  // a "fact-check failed" finding but not a fabrication tell).
+  if (claim.hallucination_signal === 'high') {
+    host.setAttribute('data-hallucination', 'high')
+  }
+  // Base z-index sits one below max so we have one slot to raise the
+  // host into when its card opens — see card.ts/claim-card.ts open()
+  // which bumps to 2147483647 so the open card overlaps adjacent
+  // hosts whose stacks would otherwise occlude it.
+  host.style.cssText = 'position: fixed; top: 0; left: 0; z-index: 2147483640; pointer-events: none;'
+  const root = host.attachShadow({ mode: 'open' })
+
+  const style = document.createElement('style')
+  style.textContent = SHADOW_STYLES
+  root.appendChild(style)
+
+  const wrap = document.createElement('div')
+  wrap.className = 'wrap'
+
+  const logo = document.createElement('div')
+  logo.className = 'crith-prov-logo'
+  // Logo background is the platform brand color via the base
+  // .crith-prov-logo rule (--crith-prov-color). Differentiation
+  // between fact-check and hallucination is in the dot below.
+  const isHallucinationLogo = claim.hallucination_signal === 'high'
+  logo.title = isHallucinationLogo
+    ? 'Crith — likely hallucination'
+    : 'Crith — fact-checked'
+  logo.appendChild(buildBrandMark())
+  // Top-right indicator dot. Same DOM + CSS pattern validations use
+  // for sycophancy/hallucination LENS dots; here it carries the
+  // claim-vs-fact-check distinction the user can read at a glance:
+  //   yellow #F59E0B → generic fact-check (verified contradicted)
+  //   purple #A855F7 → hallucination (high-signal contradiction or
+  //                    generation_artifact)
+  const dot = document.createElement('div')
+  dot.className = 'crith-prov-dot'
+  dot.style.background = isHallucinationLogo ? '#A855F7' : '#F59E0B'
+  logo.appendChild(dot)
+  wrap.appendChild(logo)
+
+  const card = document.createElement('div')
+  card.className = 'card'
+  card.dataset.state = 'default'
+  card.setAttribute('role', 'dialog')
+  card.setAttribute('aria-label', 'Verifiable claim')
+
+  // Header: claim_type chip + risk chip on a single row.
+  const header = document.createElement('div')
+  header.className = 'claim-header'
+  const claimTypeBadge = document.createElement('span')
+  claimTypeBadge.className = 'claim-type-badge'
+  const riskBadge = document.createElement('span')
+  riskBadge.className = 'risk-badge'
+  header.appendChild(claimTypeBadge)
+  header.appendChild(riskBadge)
+  card.appendChild(header)
+
+  // Claim text — the exact statement being fact-checked.
+  const claimText = document.createElement('p')
+  claimText.className = 'claim-text'
+  card.appendChild(claimText)
+
+  // why_verify — short rationale for why this claim warrants checking.
+  const whyVerify = document.createElement('p')
+  whyVerify.className = 'why-verify'
+  card.appendChild(whyVerify)
+
+  // Verify result block — hidden by default; populated + revealed by
+  // claim-card.ts after VERIFY_CLAIM resolves successfully.
+  const verifyResult = document.createElement('div')
+  verifyResult.className = 'verify-result'
+  verifyResult.hidden = true
+
+  const verdictBadge = document.createElement('span')
+  verdictBadge.className = 'verdict-badge'
+  verifyResult.appendChild(verdictBadge)
+
+  const evidence = document.createElement('p')
+  evidence.className = 'evidence'
+  verifyResult.appendChild(evidence)
+
+  // Collapsible sources via native <details>. The ▶ → ▼ rotation is
+  // handled by the [open] CSS rule in SHADOW_STYLES.
+  const sourcesDetails = document.createElement('details')
+  sourcesDetails.className = 'sources-details'
+  const sourcesSummary = document.createElement('summary')
+  sourcesSummary.className = 'sources-summary'
+  sourcesSummary.textContent = 'View sources'
+  sourcesDetails.appendChild(sourcesSummary)
+  const sourcesList = document.createElement('ul')
+  sourcesList.className = 'sources-list'
+  sourcesDetails.appendChild(sourcesList)
+  verifyResult.appendChild(sourcesDetails)
+
+  card.appendChild(verifyResult)
+
+  // Single-row button cluster — only feedback ratings now. The
+  // manual Verify button was removed when the orchestrator started
+  // auto-verifying every high/medium-signal claim before render;
+  // by the time this host attaches, the verdict is already cached.
+  const controls = document.createElement('div')
+  controls.className = 'controls'
+  const buttons: Array<{ cls: string; action: string; label: string }> = [
+    { cls: 'btn-secondary', action: 'useful',     label: 'Useful' },
+    { cls: 'btn-secondary', action: 'not_useful', label: 'Not useful' },
+  ]
+  for (const b of buttons) {
+    const btn = document.createElement('button')
+    btn.className = b.cls
+    btn.setAttribute('data-action', b.action)
+    btn.setAttribute('aria-label', b.label)
+    btn.textContent = b.label
+    controls.appendChild(btn)
+  }
+  card.appendChild(controls)
+
+  wrap.appendChild(card)
+  root.appendChild(wrap)
+
+  attachClaim(host, root, claim, underlineSpans)
+  return host
+}
+
 function positionHost(host: HTMLElement, span: Element, responseNode: Element): void {
   const r = span.getBoundingClientRect()
   const stackIndex = parseInt(host.getAttribute('data-stack-index') ?? '0', 10) || 0
   const stackY = stackIndex * STACK_SPACING_PX
+
+  let x: number
+  let baseY: number
   if (window.innerWidth < NARROW_VIEWPORT_PX) {
-    host.style.transform = `translate(${Math.max(8, r.left)}px, ${r.bottom + 6 + stackY}px)`
+    x = Math.max(8, r.left)
+    baseY = r.bottom + 6 + stackY
   } else {
     const responseRight = responseNode.getBoundingClientRect().right
-    const x = Math.min(responseRight + 6, window.innerWidth - 28)
-    host.style.transform = `translate(${x}px, ${r.top + stackY}px)`
+    x = Math.min(responseRight + 6, window.innerWidth - 28)
+    baseY = r.top + stackY
   }
+
+  // Collision avoidance across responseNodes. Same-response stacking
+  // is handled by stackIndex; that's deterministic from the per-node
+  // counter. But two adjacent responses can each render stack_index=0
+  // hosts whose anchor.tops happen to put them at the same screen y
+  // (different responseNodes don't share a counter). Walk every
+  // existing host and bump our y down past any whose rect overlaps
+  // ours at the same x.
+  let y = baseY
+  for (let i = 0; i < MAX_COLLISION_BUMPS; i++) {
+    if (!collidesWithOtherHost(host, x, y)) break
+    y += COLLISION_BUMP_PX
+  }
+
+  host.style.transform = `translate(${x}px, ${y}px)`
+}
+
+/**
+ * True if any other crith-prov-host in the document has a bounding
+ * rect that overlaps the candidate (x, y) position by both axes.
+ * "Same x" tolerance is loose (32px) to catch hosts that are at
+ * roughly the same column even if pixel-aligned slightly differently.
+ */
+function collidesWithOtherHost(self: HTMLElement, x: number, y: number): boolean {
+  const HOST_HEIGHT = 32  // logo 24px + dot lift 8px
+  const X_TOLERANCE = 32
+  const all = document.querySelectorAll('crith-prov-host')
+  for (const other of all) {
+    if (other === self) continue
+    const r = (other as HTMLElement).getBoundingClientRect()
+    // Skip if other host is currently invisible (zero-size — happens
+    // briefly during reposition cascades).
+    if (r.width === 0 || r.height === 0) continue
+    if (Math.abs(r.left - x) > X_TOLERANCE) continue
+    // Vertical overlap: candidate [y, y+HOST_HEIGHT] vs other [r.top, r.bottom]
+    if (r.top < y + HOST_HEIGHT && r.bottom > y) return true
+  }
+  return false
 }
 
 function attachReposition(host: HTMLElement, span: Element, responseNode: Element): void {
